@@ -1,219 +1,150 @@
-// hr.js
-// 인력/프리셋/배치 관리 UI
-
+/**
+ * 인력 관리: 신규 입사/퇴사, 직급/평가(A~E) 관리
+ * Firestore:
+ *  - /teams/{teamId}/members/{uid}: displayName,email,position
+ *  - /teams/{teamId}/hrProfiles/{uid}: rank(A~E), joined, left
+ */
+import { db } from './firebase-init.js';
 import {
-  listEmployees, createEmployee, updateEmployee, deleteEmployee,
-  getPresets, upsertPresets,
-  listHolidays, createHoliday, deleteHoliday,
-  listAssignments, createAssignment, deleteAssignment
-} from "./api.js";
+  collection, getDocs, setDoc, doc, deleteDoc
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { makeCSVInput, parseCSV } from './calendar.js';
 
-function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
-function clear(n){ while(n.firstChild) n.removeChild(n.firstChild); }
-
-export async function mountHR(state) {
-  await renderEmpTable(state);
-  await renderPresetsPanel(state);
-  await renderAssignSection(state);
-
-  // 등록 이벤트
-  document.getElementById('btn-emp-add').onclick = async () => {
-    const emp = {
-      name: document.getElementById('emp-name').value.trim(),
-      team: document.getElementById('emp-team').value.trim(),
-      rank: document.getElementById('emp-rank').value.trim(),
-      eval: document.getElementById('emp-eval').value.trim(),
-      joined: document.getElementById('emp-joined').value || null,
-      left: document.getElementById('emp-left').value || null
-    };
-    if (!emp.name) return alert('이름은 필수입니다.');
-    await createEmployee(emp);
-    await state.reload();
-    await renderEmpTable(state);
-  };
-  document.getElementById('btn-emp-refresh').onclick = async () => {
-    await state.reload();
-    await renderEmpTable(state);
-  };
-
-  document.getElementById('btn-add-role').onclick = async () => {
-    const val = document.getElementById('preset-role').value.trim();
-    if (!val) return;
-    const p = await getPresets();
-    const roles = Array.from(new Set([...(p.roles||[]), val]));
-    await upsertPresets({ roles });
-    document.getElementById('preset-role').value='';
-    await state.reload();
-    await renderPresetsPanel(state);
-  };
-  document.getElementById('btn-add-task').onclick = async () => {
-    const val = document.getElementById('preset-task').value.trim();
-    if (!val) return;
-    const p = await getPresets();
-    const tasks = Array.from(new Set([...(p.tasks||[]), val]));
-    await upsertPresets({ tasks });
-    document.getElementById('preset-task').value='';
-    await state.reload();
-    await renderPresetsPanel(state);
-  };
-  document.getElementById('btn-add-holiday').onclick = async () => {
-    const date = document.getElementById('preset-holiday-date').value;
-    const name = document.getElementById('preset-holiday-name').value.trim();
-    if (!date || !name) return alert('휴일 날짜/이름을 입력하세요.');
-    await createHoliday({ date, name });
-    document.getElementById('preset-holiday-date').value='';
-    document.getElementById('preset-holiday-name').value='';
-    await state.reload();
-    await renderPresetsPanel(state);
-  };
-
-  document.getElementById('btn-as-add').onclick = async () => {
-    const empId = document.getElementById('as-emp').value;
-    const role = document.getElementById('as-role').value;
-    const task = document.getElementById('as-task').value;
-    const startDate = document.getElementById('as-start').value;
-    const endDate = document.getElementById('as-end').value;
-    if (!empId || !role || !task || !startDate || !endDate) return alert('모든 항목을 입력하세요.');
-    await createAssignment({ employeeId: empId, role, task, startDate, endDate });
-    await state.reload();
-    await renderAssignTable(state);
-  };
-  document.getElementById('btn-as-refresh').onclick = async () => {
-    await state.reload();
-    await renderAssignTable(state);
-  };
+async function loadMembers(teamId) {
+  const snaps = await getDocs(collection(db, 'teams', teamId, 'members'));
+  const arr = [];
+  snaps.forEach(d => arr.push({ id: d.id, ...d.data() }));
+  arr.sort((a,b) => (a.displayName||'').localeCompare(b.displayName||'', 'ko'));
+  return arr;
+}
+async function loadProfiles(teamId) {
+  const snaps = await getDocs(collection(db, 'teams', teamId, 'hrProfiles'));
+  const map = {};
+  snaps.forEach(d => map[d.id] = d.data());
+  return map;
 }
 
-async function renderEmpTable(state) {
-  const wrap = document.getElementById('emp-table');
-  clear(wrap);
-  const tbl = el(`<table class="min-w-full border text-left">
-    <thead><tr class="bg-gray-50">
-      <th class="px-2 py-1">이름</th><th class="px-2 py-1">팀</th><th class="px-2 py-1">직급</th>
-      <th class="px-2 py-1">평가</th><th class="px-2 py-1">입사</th><th class="px-2 py-1">퇴사</th><th class="px-2 py-1">액션</th>
-    </tr></thead><tbody></tbody></table>`);
-  const tb = tbl.querySelector('tbody');
-  state.employees.forEach(e => {
-    const tr = el(`<tr class="border-t">
-      <td class="px-2 py-1">${e.name}</td>
-      <td class="px-2 py-1">${e.team || ''}</td>
-      <td class="px-2 py-1">${e.rank || ''}</td>
-      <td class="px-2 py-1">${e.eval || ''}</td>
-      <td class="px-2 py-1">${e.joined || ''}</td>
-      <td class="px-2 py-1">${e.left || ''}</td>
-      <td class="px-2 py-1">
-        <button class="btn-mini" data-edit="${e.id}">수정</button>
-        <button class="btn-mini" data-del="${e.id}">삭제</button>
-      </td>
-    </tr>`);
+export function renderHRView(profile) {
+  const root = document.createElement('div');
+  root.className = 'bg-white dark:bg-gray-900 p-6 rounded-xl shadow-sm';
+  root.innerHTML = `
+    <p class="text-xl font-bold mb-4">인력 관리</p>
+    <div class="flex flex-wrap items-end gap-3 mb-4">
+      <button id="add-member" class="bg-[#1173d4] text-white rounded px-3 py-2">신규 입사</button>
+      <button id="delete-member" class="bg-red-500 text-white rounded px-3 py-2">퇴사(삭제)</button>
+      <div class="text-sm text-gray-500">* 간단 CRUD. 상세 필드는 CSV로 일괄 반영 가능</div>
+    </div>
+    <div id="csv-host" class="mb-4"></div>
+    <div id="hr-list" class="overflow-x-auto"></div>
+  `;
 
-    tr.querySelector('[data-del]').onclick = async () => {
-      if (!confirm('삭제하시겠습니까?')) return;
-      await deleteEmployee(e.id);
-      await state.reload();
-      await renderEmpTable(state);
-    };
-    tr.querySelector('[data-edit]').onclick = async () => {
-      const name = prompt('이름', e.name) ?? e.name;
-      const team = prompt('팀', e.team || '') ?? e.team;
-      const rank = prompt('직급', e.rank || '') ?? e.rank;
-      const ev = prompt('평가(A~E)', e.eval || '') ?? e.eval;
-      const joined = prompt('입사(YYYY-MM-DD)', e.joined || '') ?? e.joined;
-      const left = prompt('퇴사(YYYY-MM-DD)', e.left || '') ?? e.left;
-      await updateEmployee({ id:e.id, name, team, rank, eval:ev, joined, left });
-      await state.reload();
-      await renderEmpTable(state);
-    };
+  const csvHost = root.querySelector('#csv-host');
+  csvHost.appendChild(
+    makeCSVInput('CSV 업로드( members / profiles )', async (text) => {
+      const rows = parseCSV(text);
+      for (const r of rows) {
+        const tp = (r.type||'').toLowerCase();
+        if (tp === 'members') {
+          const uid = r.uid || crypto.randomUUID();
+          await setDoc(doc(db, 'teams', profile.teamId, 'members', uid), {
+            displayName: r.displayName, email: r.email, position: r.position
+          }, { merge: true });
+        } else if (tp === 'profiles') {
+          await setDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', r.uid), {
+            rank: r.rank, joined: r.joined || null, left: r.left || null
+          }, { merge: true });
+        }
+      }
+      alert('CSV 반영 완료');
+      renderList();
+    })
+  );
 
-    tb.appendChild(tr);
-  });
-  wrap.appendChild(tbl);
-}
-
-async function renderPresetsPanel(state) {
-  const roles = document.getElementById('list-roles');
-  const tasks = document.getElementById('list-tasks');
-  const hols  = document.getElementById('list-holidays');
-  roles.innerHTML = ''; tasks.innerHTML = ''; hols.innerHTML = '';
-
-  (state.presets.roles || []).forEach((v, idx) => {
-    const li = el(`<li class="flex items-center justify-between"><span>${v}</span><button class="btn-mini">X</button></li>`);
-    li.querySelector('button').onclick = async () => {
-      const p = await getPresets();
-      p.roles.splice(idx, 1);
-      await upsertPresets({ roles: p.roles });
-      await state.reload();
-      await renderPresetsPanel(state);
-    };
-    roles.appendChild(li);
+  root.querySelector('#add-member').addEventListener('click', async () => {
+    const name = prompt('이름?');
+    if (!name) return;
+    const email = prompt('이메일?(선택)') || '';
+    const position = prompt('직급/직책?(선택)') || '';
+    const uid = crypto.randomUUID();
+    await setDoc(doc(db, 'teams', profile.teamId, 'members', uid), {
+      displayName: name, email, position
+    });
+    await setDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', uid), {
+      rank: 'C', joined: new Date().toISOString().slice(0,10)
+    }, { merge: true });
+    renderList();
   });
 
-  (state.presets.tasks || []).forEach((v, idx) => {
-    const li = el(`<li class="flex items-center justify-between"><span>${v}</span><button class="btn-mini">X</button></li>`);
-    li.querySelector('button').onclick = async () => {
-      const p = await getPresets();
-      p.tasks.splice(idx, 1);
-      await upsertPresets({ tasks: p.tasks });
-      await state.reload();
-      await renderPresetsPanel(state);
-    };
-    tasks.appendChild(li);
+  root.querySelector('#delete-member').addEventListener('click', async () => {
+    const uid = prompt('퇴사 처리할 UID? (members 문서 ID)');
+    if (!uid) return;
+    await deleteDoc(doc(db, 'teams', profile.teamId, 'members', uid));
+    await deleteDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', uid));
+    alert('삭제 완료');
+    renderList();
   });
 
-  // 휴일: holidays 컬렉션(서버 데이터) 표시
-  state.holidays.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(h => {
-    const li = el(`<li class="flex items-center justify-between">
-      <span>${h.date} ${h.name}</span>
-      <button class="btn-mini">X</button>
-    </li>`);
-    li.querySelector('button').onclick = async () => {
-      await deleteHoliday(h.id);
-      await state.reload();
-      await renderPresetsPanel(state);
-    };
-    hols.appendChild(li);
-  });
-}
+  async function renderList() {
+    const listHost = root.querySelector('#hr-list');
+    const members = await loadMembers(profile.teamId);
+    const profiles = await loadProfiles(profile.teamId);
 
-async function renderAssignSection(state) {
-  // 셀렉터
-  const se = document.getElementById('as-emp');
-  const sr = document.getElementById('as-role');
-  const st = document.getElementById('as-task');
-  se.innerHTML=''; sr.innerHTML=''; st.innerHTML='';
-  state.employees.forEach(e => se.appendChild(el(`<option value="${e.id}">${e.name}</option>`)));
-  (state.presets.roles||[]).forEach(v => sr.appendChild(el(`<option>${v}</option>`)));
-  (state.presets.tasks||[]).forEach(v => st.appendChild(el(`<option>${v}</option>`)));
-  // 테이블
-  await renderAssignTable(state);
-}
+    const table = document.createElement('table');
+    table.className = 'min-w-[720px] w-full text-sm';
+    table.innerHTML = `
+      <thead>
+        <tr class="text-left border-b">
+          <th class="py-2">UID</th>
+          <th class="py-2">이름</th>
+          <th class="py-2">이메일</th>
+          <th class="py-2">직급/직책</th>
+          <th class="py-2">평가(A~E)</th>
+          <th class="py-2">입사일</th>
+          <th class="py-2">퇴사일</th>
+          <th class="py-2">저장</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${members.map(m => {
+          const p = profiles[m.id] || {};
+          return `
+          <tr class="border-b" data-uid="${m.id}">
+            <td class="py-2 text-gray-500">${m.id}</td>
+            <td class="py-2">${m.displayName ?? ''}</td>
+            <td class="py-2">${m.email ?? ''}</td>
+            <td class="py-2"><input class="border rounded px-2 py-1" data-field="position" value="${m.position ?? ''}"></td>
+            <td class="py-2">
+              <select class="border rounded px-2 py-1" data-field="rank">
+                ${['A','B','C','D','E'].map(r => `<option value="${r}" ${p.rank===r?'selected':''}>${r}</option>`).join('')}
+              </select>
+            </td>
+            <td class="py-2"><input type="date" class="border rounded px-2 py-1" data-field="joined" value="${p.joined ?? ''}"></td>
+            <td class="py-2"><input type="date" class="border rounded px-2 py-1" data-field="left" value="${p.left ?? ''}"></td>
+            <td class="py-2"><button class="bg-[#1173d4] text-white rounded px-2 py-1 save-row">저장</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    `;
+    listHost.innerHTML = '';
+    listHost.appendChild(table);
 
-export async function renderAssignTable(state) {
-  const wrap = document.getElementById('as-table');
-  wrap.innerHTML = '';
-  const tbl = el(`<table class="min-w-full border text-left">
-    <thead><tr class="bg-gray-50">
-      <th class="px-2 py-1">이름</th><th class="px-2 py-1">역할</th><th class="px-2 py-1">업무</th>
-      <th class="px-2 py-1">시작</th><th class="px-2 py-1">종료</th><th class="px-2 py-1">액션</th>
-    </tr></thead><tbody></tbody></table>`);
-  const tb = tbl.querySelector('tbody');
-  state.assignments.forEach(a => {
-    const emp = state.employees.find(e => e.id===a.employeeId);
-    const tr = el(`<tr class="border-t">
-      <td class="px-2 py-1">${emp ? emp.name : a.employeeId}</td>
-      <td class="px-2 py-1">${a.role || ''}</td>
-      <td class="px-2 py-1">${a.task || ''}</td>
-      <td class="px-2 py-1">${a.startDate}</td>
-      <td class="px-2 py-1">${a.endDate}</td>
-      <td class="px-2 py-1"><button class="btn-mini">삭제</button></td>
-    </tr>`);
-    tr.querySelector('button').onclick = async () => {
-      if (!confirm('삭제하시겠습니까?')) return;
-      await deleteAssignment(a.id);
-      await state.reload();
-      await renderAssignTable(state);
-    };
-    tb.appendChild(tr);
-  });
-  wrap.appendChild(tbl);
-}
+    table.querySelectorAll('.save-row').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const tr = btn.closest('tr');
+        const uid = tr.getAttribute('data-uid');
+        const pos = /** @type {HTMLInputElement} */(tr.querySelector('[data-field="position"]')).value;
+        const rank = /** @type {HTMLSelectElement} */(tr.querySelector('[data-field="rank"]')).value;
+        const joined = /** @type {HTMLInputElement} */(tr.querySelector('[data-field="joined"]')).value;
+        const left = /** @type {HTMLInputElement} */(tr.querySelector('[data-field="left"]')).value;
+
+        await setDoc(doc(db, 'teams', profile.teamId, 'members', uid), { position: pos }, { merge: true });
+        await setDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', uid), { rank, joined: joined || null, left: left || null }, { merge: true });
+
+        tr.style.outline = '2px solid #93c5fd';
+        setTimeout(() => (tr.style.outline = ''), 700);
+      });
+    });
+  }
+
+  renderList();
+  return root;
