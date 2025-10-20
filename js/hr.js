@@ -1,9 +1,11 @@
 // js/hr.js
 // 인력 관리: CRUD + CSV 업로드
+// 비관리자는 자신의 팀만 조회 가능(팀 필터 쿼리). 관리자는 전체.
 
 import { db } from "./firebase.js";
+import { requireAuthAndTeams } from "./auth.js";
 import {
-  collection, getDocs, addDoc, doc, setDoc, updateDoc, deleteDoc
+  collection, getDocs, addDoc, doc, setDoc, updateDoc, deleteDoc, query, where
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 export async function renderHRPage(container){
@@ -63,6 +65,8 @@ export async function renderHRPage(container){
     </div>
   `;
 
+  const { currentTeams, isAdmin } = await requireAuthAndTeams();
+
   const nameEl = document.getElementById("emp-name");
   const teamEl = document.getElementById("emp-team");
   const rankEl = document.getElementById("emp-rank");
@@ -72,7 +76,6 @@ export async function renderHRPage(container){
   const evalEl = document.getElementById("emp-eval");
 
   document.getElementById("emp-add").onclick = async ()=>{
-    // id는 이름+팀 기반 생성 or 수동 ID? -> 여기서는 Firestore autoId 사용
     const payload = {
       name: nameEl.value.trim(),
       team: teamEl.value.trim(),
@@ -83,20 +86,36 @@ export async function renderHRPage(container){
       evalGrade: evalEl.value || ""
     };
     if (!payload.name) { alert("이름은 필수입니다."); return; }
+    if (!payload.team) { alert("팀은 필수입니다."); return; }
 
-    // 동일 이름/팀 있으면 업데이트, 없으면 신규
-    const snap = await getDocs(collection(db, "employees"));
+    // 동일 팀 내 동일 이름 존재 시 업데이트 (팀 필터 쿼리)
     let foundId = null;
-    snap.forEach(d=>{
-      const e = d.data();
-      if (e.name===payload.name && e.team===payload.team) foundId = d.id;
-    });
-    if (foundId) {
-      await updateDoc(doc(db, "employees", foundId), payload);
-      alert("업데이트 완료");
+    const baseCol = collection(db, "employees");
+    let snaps;
+    if (isAdmin) {
+      // 관리자: 팀 기준으로만 좁혀서 읽고 이름 비교 (전체 스캔 지양)
+      const q1 = query(baseCol, where("team","==", payload.team));
+      snaps = await getDocs(q1);
     } else {
-      await addDoc(collection(db, "employees"), payload);
-      alert("추가 완료");
+      // 비관리자: 자신의 팀만
+      if (!currentTeams.includes(payload.team)) {
+        alert("해당 팀에 대한 쓰기 권한이 없습니다.");
+        return;
+      }
+      const q1 = query(baseCol, where("team","==", payload.team));
+      snaps = await getDocs(q1);
+    }
+    snaps.forEach(d=>{
+      const e = d.data();
+      if (e.name===payload.name) foundId = d.id;
+    });
+
+    if (foundId) {
+      await updateDoc(doc(db, "employees", foundId), payload); // 규칙상 관리자만 write 가능
+      alert("업데이트 완료(관리자 전용 기능)");
+    } else {
+      await addDoc(collection(db, "employees"), payload);       // 규칙상 관리자만 write 가능
+      alert("추가 완료(관리자 전용 기능)");
     }
     await renderList();
   };
@@ -110,12 +129,10 @@ export async function renderHRPage(container){
     a.click();
   };
 
-  // 간단 CSV 파서 (따옴표/콤마 기본 처리, 엣지케이스 단순화)
   function parseCSV(text){
     const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n").filter(Boolean);
     const headers = lines[0].split(",").map(s=>s.trim());
     return lines.slice(1).map(line=>{
-      // 기본 콤마 split. 큰따옴표 포함 케이스는 더 정교한 파서 필요(사내 포맷은 단순 가정)
       const cols = line.split(",").map(s=>s.trim());
       const obj = {};
       headers.forEach((h, i)=> obj[h] = (cols[i]||""));
@@ -128,7 +145,11 @@ export async function renderHRPage(container){
     if (!f) { alert("CSV 파일을 선택하세요."); return; }
     const text = await f.text();
     const rows = parseCSV(text);
-    // 업서트
+    // 관리자가 아닌 경우 업로드 차단(규칙도 write 차단)
+    if (!isAdmin) {
+      alert("CSV 업로드는 관리자만 가능합니다.");
+      return;
+    }
     for (const r of rows) {
       const payload = {
         name: r.name || "",
@@ -139,6 +160,7 @@ export async function renderHRPage(container){
         leaveDate: r.leaveDate || "",
         evalGrade: r.evalGrade || ""
       };
+      if (!payload.team) continue;
       if (r.id) {
         await setDoc(doc(db, "employees", r.id), payload, { merge:true });
       } else {
@@ -151,9 +173,32 @@ export async function renderHRPage(container){
 
   async function renderList(){
     const listEl = document.getElementById("emp-list");
-    const snap = await getDocs(collection(db, "employees"));
-    const rows = [];
-    snap.forEach(d=> rows.push({ id:d.id, ...d.data() }));
+    const baseCol = collection(db, "employees");
+    let rows = [];
+
+    if (isAdmin) {
+      const snaps = await getDocs(baseCol);
+      snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
+    } else {
+      // 팀 in 쿼리 (10개 제한 대응)
+      const teams = currentTeams || [];
+      if (!teams.length) {
+        listEl.innerHTML = `<div class="p-4 text-sm text-rose-600">팀 권한이 없습니다. 관리자에게 문의하세요.</div>`;
+        return;
+      }
+      if (teams.length <= 10) {
+        const q1 = query(baseCol, where("team","in", teams));
+        const snaps = await getDocs(q1);
+        snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
+      } else {
+        for (let i=0;i<teams.length;i+=10) {
+          const q1 = query(baseCol, where("team","in", teams.slice(i,i+10)));
+          const snaps = await getDocs(q1);
+          snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
+        }
+      }
+    }
+
     rows.sort((a,b)=> (a.team||"").localeCompare(b.team||"") || (a.name||"").localeCompare(b.name||""));
 
     listEl.innerHTML = `
@@ -183,7 +228,7 @@ export async function renderHRPage(container){
               <td class="py-2 px-3">${r.leaveDate||""}</td>
               <td class="py-2 px-3">${r.evalGrade||""}</td>
               <td class="py-2 px-3">
-                <button data-id="${r.id}" class="emp-del text-rose-600 hover:underline">삭제</button>
+                <button data-id="${r.id}" class="emp-del text-rose-600 hover:underline"${isAdmin ? "" : " disabled"}>${isAdmin ? "삭제" : "삭제(관리자 전용)"}</button>
               </td>
             </tr>
           `).join("")}
@@ -193,6 +238,7 @@ export async function renderHRPage(container){
 
     listEl.querySelectorAll(".emp-del").forEach(btn=>{
       btn.addEventListener("click", async ()=>{
+        if (!isAdmin) { alert("삭제는 관리자만 가능합니다."); return; }
         if (!confirm("삭제하시겠습니까?")) return;
         await deleteDoc(doc(db, "employees", btn.dataset.id));
         await renderList();
