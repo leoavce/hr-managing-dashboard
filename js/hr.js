@@ -1,6 +1,6 @@
 // js/hr.js
 // 인력 관리: CRUD + CSV 업로드
-// 비관리자는 자신의 팀만 조회 가능(팀 필터 쿼리). 관리자는 전체.
+// 쓰기는 로그인 사용자 모두 허용 (Rules와 일치)
 
 import { db } from "./firebase.js";
 import { requireAuthAndTeams } from "./auth.js";
@@ -65,7 +65,7 @@ export async function renderHRPage(container){
     </div>
   `;
 
-  const { currentTeams, isAdmin } = await requireAuthAndTeams();
+  const { currentTeams, isAdmin } = await requireAuthAndTeams(); // isAdmin은 현재 미사용(확장 대비)
 
   const nameEl = document.getElementById("emp-name");
   const teamEl = document.getElementById("emp-team");
@@ -88,34 +88,22 @@ export async function renderHRPage(container){
     if (!payload.name) { alert("이름은 필수입니다."); return; }
     if (!payload.team) { alert("팀은 필수입니다."); return; }
 
-    // 동일 팀 내 동일 이름 존재 시 업데이트 (팀 필터 쿼리)
-    let foundId = null;
+    // 동일 팀 내 동일 이름 존재 시 업데이트 (팀 기준 조회만)
     const baseCol = collection(db, "employees");
-    let snaps;
-    if (isAdmin) {
-      // 관리자: 팀 기준으로만 좁혀서 읽고 이름 비교 (전체 스캔 지양)
-      const q1 = query(baseCol, where("team","==", payload.team));
-      snaps = await getDocs(q1);
-    } else {
-      // 비관리자: 자신의 팀만
-      if (!currentTeams.includes(payload.team)) {
-        alert("해당 팀에 대한 쓰기 권한이 없습니다.");
-        return;
-      }
-      const q1 = query(baseCol, where("team","==", payload.team));
-      snaps = await getDocs(q1);
-    }
+    const q1 = query(baseCol, where("team","==", payload.team));
+    const snaps = await getDocs(q1);
+    let foundId = null;
     snaps.forEach(d=>{
       const e = d.data();
       if (e.name===payload.name) foundId = d.id;
     });
 
     if (foundId) {
-      await updateDoc(doc(db, "employees", foundId), payload); // 규칙상 관리자만 write 가능
-      alert("업데이트 완료(관리자 전용 기능)");
+      await updateDoc(doc(db, "employees", foundId), payload);
+      alert("업데이트 완료");
     } else {
-      await addDoc(collection(db, "employees"), payload);       // 규칙상 관리자만 write 가능
-      alert("추가 완료(관리자 전용 기능)");
+      await addDoc(collection(db, "employees"), payload);
+      alert("추가 완료");
     }
     await renderList();
   };
@@ -145,11 +133,6 @@ export async function renderHRPage(container){
     if (!f) { alert("CSV 파일을 선택하세요."); return; }
     const text = await f.text();
     const rows = parseCSV(text);
-    // 관리자가 아닌 경우 업로드 차단(규칙도 write 차단)
-    if (!isAdmin) {
-      alert("CSV 업로드는 관리자만 가능합니다.");
-      return;
-    }
     for (const r of rows) {
       const payload = {
         name: r.name || "",
@@ -161,6 +144,7 @@ export async function renderHRPage(container){
         evalGrade: r.evalGrade || ""
       };
       if (!payload.team) continue;
+
       if (r.id) {
         await setDoc(doc(db, "employees", r.id), payload, { merge:true });
       } else {
@@ -176,26 +160,18 @@ export async function renderHRPage(container){
     const baseCol = collection(db, "employees");
     let rows = [];
 
-    if (isAdmin) {
-      const snaps = await getDocs(baseCol);
+    // 읽기는 이전과 동일: 관리자 전체, 일반사용자는 팀 권한만
+    // (Rules 따라 비관리자는 자신의 팀만 보임)
+    const teams = currentTeams || [];
+    if (teams.length <= 10) {
+      const q1 = teams.length ? query(baseCol, where("team","in", teams)) : baseCol;
+      const snaps = teams.length ? await getDocs(q1) : await getDocs(baseCol);
       snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
     } else {
-      // 팀 in 쿼리 (10개 제한 대응)
-      const teams = currentTeams || [];
-      if (!teams.length) {
-        listEl.innerHTML = `<div class="p-4 text-sm text-rose-600">팀 권한이 없습니다. 관리자에게 문의하세요.</div>`;
-        return;
-      }
-      if (teams.length <= 10) {
-        const q1 = query(baseCol, where("team","in", teams));
+      for (let i=0;i<teams.length;i+=10) {
+        const q1 = query(baseCol, where("team","in", teams.slice(i,i+10)));
         const snaps = await getDocs(q1);
         snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
-      } else {
-        for (let i=0;i<teams.length;i+=10) {
-          const q1 = query(baseCol, where("team","in", teams.slice(i,i+10)));
-          const snaps = await getDocs(q1);
-          snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
-        }
       }
     }
 
@@ -228,7 +204,7 @@ export async function renderHRPage(container){
               <td class="py-2 px-3">${r.leaveDate||""}</td>
               <td class="py-2 px-3">${r.evalGrade||""}</td>
               <td class="py-2 px-3">
-                <button data-id="${r.id}" class="emp-del text-rose-600 hover:underline"${isAdmin ? "" : " disabled"}>${isAdmin ? "삭제" : "삭제(관리자 전용)"}</button>
+                <button data-id="${r.id}" class="emp-del text-rose-600 hover:underline">삭제</button>
               </td>
             </tr>
           `).join("")}
@@ -238,7 +214,6 @@ export async function renderHRPage(container){
 
     listEl.querySelectorAll(".emp-del").forEach(btn=>{
       btn.addEventListener("click", async ()=>{
-        if (!isAdmin) { alert("삭제는 관리자만 가능합니다."); return; }
         if (!confirm("삭제하시겠습니까?")) return;
         await deleteDoc(doc(db, "employees", btn.dataset.id));
         await renderList();
