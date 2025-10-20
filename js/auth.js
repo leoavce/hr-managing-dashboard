@@ -1,90 +1,115 @@
-/**
- * 인증/세션 관리.
- * - 이메일/비번 로그인(간단)
- * - 로그아웃
- * - onAuthStateChanged 로 사용자 팀 스코프 결정
- */
-import { auth, db } from './firebase-init.js';
+// js/auth.js
+// Firebase Auth UI 로직 및 세션 제어
+
+import { auth, googleProvider, db } from "./firebase.js";
 import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+  signInWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import {
   doc, getDoc
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const overlayId = 'login-overlay';
+const authView = document.getElementById("auth-view");
+const appView = document.getElementById("app-view");
+const sidebar = document.getElementById("sidebar");
+const pageTitle = document.getElementById("page-title");
+const pageContainer = document.getElementById("page-container");
+const userEmailEl = document.getElementById("user-email");
+const signoutBtn = document.getElementById("signout-btn");
+const banner = document.getElementById("app-banner");
 
-function ensureLoginOverlay() {
-  if (document.getElementById(overlayId)) return;
-  const overlay = document.createElement('div');
-  overlay.id = overlayId;
-  overlay.className = 'login-overlay';
-  overlay.innerHTML = `
-    <div class="login-card">
-      <h2>로그인</h2>
-      <p class="text-sm text-gray-600 mb-4">사내 계정(테스트용 이메일/비밀번호)을 입력하세요.</p>
-      <form id="login-form" class="space-y-3">
-        <div>
-          <label class="text-sm text-gray-700">이메일</label>
-          <input id="login-email" type="email" required class="mt-1 w-full border rounded px-3 py-2">
-        </div>
-        <div>
-          <label class="text-sm text-gray-700">비밀번호</label>
-          <input id="login-password" type="password" required class="mt-1 w-full border rounded px-3 py-2">
-        </div>
-        <button class="w-full bg-[#1173d4] text-white font-semibold rounded py-2" type="submit">로그인</button>
-      </form>
-      <p id="login-error" class="text-sm text-red-600 mt-3 hidden"></p>
-    </div>
-  `;
-  document.body.appendChild(overlay);
+const loginForm = document.getElementById("login-form");
+const emailInput = document.getElementById("login-email");
+const pwInput = document.getElementById("login-password");
+const googleBtn = document.getElementById("google-btn");
 
-  document.getElementById('login-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = /** @type {HTMLInputElement} */(document.getElementById('login-email')).value.trim();
-    const pw = /** @type {HTMLInputElement} */(document.getElementById('login-password')).value;
-    const err = document.getElementById('login-error');
-    err.classList.add('hidden');
-    try {
-      await signInWithEmailAndPassword(auth, email, pw);
-    } catch (e) {
-      err.textContent = '로그인 실패: ' + (e?.message ?? '확인 필요');
-      err.classList.remove('hidden');
-    }
-  });
+let currentUser = null;
+let currentTeams = [];  // 접속 사용자가 볼 수 있는 팀 리스트
+let canSeeAll = false;  // 전체 조직 열람 권한
+
+function showBanner(msg, type="info") {
+  banner.className = `w-full p-2 text-sm ${type === "error" ? "bg-rose-50 text-rose-700" : "bg-blue-50 text-blue-700"}`;
+  banner.textContent = msg;
+  banner.classList.remove("hidden");
+  setTimeout(()=> banner.classList.add("hidden"), 4000);
 }
 
-export function showLogin() {
-  ensureLoginOverlay();
-  document.getElementById(overlayId).style.display = 'flex';
-}
-export function hideLogin() {
-  const el = document.getElementById(overlayId);
-  if (el) el.style.display = 'none';
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const email = emailInput.value.trim();
+    const pw = pwInput.value;
+    await signInWithEmailAndPassword(auth, email, pw);
+  } catch (err) {
+    console.error(err);
+    showBanner("로그인 실패: 이메일/비밀번호를 확인하세요.", "error");
+  }
+});
+
+googleBtn.addEventListener("click", async () => {
+  try {
+    await signInWithPopup(auth, googleProvider);
+  } catch (err) {
+    console.error(err);
+    showBanner("Google 로그인 실패", "error");
+  }
+});
+
+signoutBtn.addEventListener("click", async () => {
+  try {
+    await signOut(auth);
+  } catch (err) {
+    console.error(err);
+    showBanner("로그아웃 오류", "error");
+  }
+});
+
+// 사용자 권한(팀)을 로드
+async function loadUserTeams(uid) {
+  // user_teams/{uid} 문서 예시: { teams: ["SEC","INFRA"], all: false }
+  const ref = doc(db, "user_teams", uid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    const data = snap.data();
+    currentTeams = Array.isArray(data.teams) ? data.teams : [];
+    canSeeAll = !!data.all;
+  } else {
+    // 기본: 권한 미설정 → 접근 불가 (빈 화면 방지 위해 안내)
+    currentTeams = [];
+    canSeeAll = false;
+  }
 }
 
-export async function fetchUserProfile(uid) {
-  // /users/{uid}: {displayName, email, teamId, role}
-  const snap = await getDoc(doc(db, 'users', uid));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() };
+// 라우팅 초기화 (app.js에 공개)
+export async function requireAuthAndTeams() {
+  return { currentUser, currentTeams, canSeeAll };
 }
 
-export function listenAuth(callback) {
-  // callback({ user, profile }) 로 통지
-  onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-      callback({ user: null, profile: null });
-      showLogin();
-      return;
-    }
-    hideLogin();
-    const profile = await fetchUserProfile(user.uid);
-    callback({ user, profile });
-  });
-}
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    currentUser = user;
+    await loadUserTeams(user.uid);
 
-export async function doLogout() {
-  await signOut(auth);
+    // UI 전환
+    authView.classList.add("hidden");
+    appView.classList.remove("hidden");
+    sidebar.classList.remove("hidden");
+    document.getElementById("signed-in-profile").classList.remove("hidden");
+    userEmailEl.textContent = user.email || "(이메일 없음)";
+
+    // 초기 라우트
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  } else {
+    currentUser = null;
+    currentTeams = [];
+    canSeeAll = false;
+
+    authView.classList.remove("hidden");
+    appView.classList.add("hidden");
+    sidebar.classList.add("hidden");
+    document.getElementById("signed-in-profile").classList.add("hidden");
+    userEmailEl.textContent = "";
+    pageContainer.innerHTML = "";
+    pageTitle.textContent = "로그인";
+  }
+});
