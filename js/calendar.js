@@ -1,32 +1,29 @@
 // js/calendar.js
-// 변경 사항 요약
-// - 역할 칼럼 제거, 행의 이름 아래에 "역할" 표시(직원 primaryRole 사용, 없으면 기간 내 배정의 역할들 요약)
-// - 상단 툴바에 글로벌 버튼 추가: "업무 배정" / "역할 편집"
-//   · 업무 배정: 여러 인원을 선택해 동일 업무/기간/투입률 배정
-//   · 역할 편집: 여러 인원의 primaryRole 일괄 수정
-// - 헤더: 1행 = 월(연-월, 월별로 스팬), 2행 = 요일/날짜(촘촘)
-// - 셀 폭 32px로 축소, 주말 제외, 공휴일 붉은색
-// - 동일 업무는 연속 스팬 막대로 1개만 표시(막대 클릭으로 수정/삭제)
+// 변경 요약
+// - 스팬 막대 내부에 업무명 표시(중앙 라벨)
+// - 좌/우 가로 스크롤 시 무한 확장(앞/뒤 날짜 계속 추가) – 끊김 없이 이어짐
+// - 역할 칼럼 제거, 좌측 팀원 아래에 역할 표시
+// - 헤더: 1행 월 스팬, 2행 요일/날짜(촘촘), 한국 공휴일 붉게
+// - 동일 업무 연속기간 병합 스팬
 
 import { db } from "./firebase.js";
 import {
-  collection, getDocs, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, query, where
+  collection, getDocs, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-// ===== 날짜 유틸 =====
+/* ===== 유틸 ===== */
 function fmt(d){ return d.toISOString().slice(0,10); }
 function parseYmd(s){ const [y,m,dd]=s.split("-").map(Number); return new Date(y, m-1, dd); }
 function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 function isWeekend(d){ const day=d.getDay(); return day===0 || day===6; }
 const DAYNAMES = ["일","월","화","수","목","금","토"];
+const CELL_PX = 32; // styles.css와 동일
 
-// ===== 화면 상태 =====
+// 무한 스크롤 제어
 let viewStartDate = new Date();
-// 44 영업일 ≒ 2개월 평일 기준(주말 제외)
-const VIEW_WORKDAYS = 44;
-const CELL_PX = 32; // styles.css와 동일 값
+let viewWorkdays = 44; // 처음 보이는 평일 컬럼 수(주말 제외). 스크롤 시 동적으로 증가.
 
-// ===== 한국 공휴일(샘플) + Firestore 병합 =====
+/* ===== 한국 공휴일(예시) + Firestore 병합 ===== */
 const STATIC_HOLIDAYS = {
   2024: ["2024-01-01","2024-02-09","2024-02-12","2024-03-01","2024-04-10","2024-05-05","2024-05-06","2024-06-06","2024-08-15","2024-09-16","2024-09-17","2024-09-18","2024-10-03","2024-10-09","2024-12-25"],
   2025: ["2025-01-01","2025-01-28","2025-01-29","2025-01-30","2025-03-01","2025-05-05","2025-06-06","2025-08-15","2025-10-03","2025-10-06","2025-10-09","2025-12-25"],
@@ -48,19 +45,18 @@ async function loadYearHolidays(year){
   }
 }
 
-// 평일만 포함하되, 공휴일은 표시 목적상 포함(헤더/셀 강조)
-async function getWeekdaysIncludingHolidays(startDate, targetCount) {
+async function getWeekdaysIncludingHolidays(startDate, count) {
   const out = [];
   let d = new Date(startDate);
 
-  // 미리 연도별 휴일 세트 준비
+  // 연도별 휴일 세트 준비
   const holidayMap = {};
   const collectYears = new Set();
-  const probeEnd = addDays(d, targetCount * 2);
+  const probeEnd = addDays(d, count * 2);
   for (let y=d.getFullYear(); y<=probeEnd.getFullYear(); y++) collectYears.add(y);
   for (const y of collectYears) holidayMap[y] = new Set(await loadYearHolidays(y));
 
-  while (out.length < targetCount) {
+  while (out.length < count) {
     if (!isWeekend(d)) {
       out.push({ date: new Date(d), isHoliday: holidayMap[d.getFullYear()].has(fmt(d)) });
     }
@@ -69,7 +65,19 @@ async function getWeekdaysIncludingHolidays(startDate, targetCount) {
   return out;
 }
 
-// 직원 로드(전체)
+// 평일 기준 n일 뒤(앞)로 이동(주말만 스킵 – 공휴일은 컬럼에 포함되므로 "평일"로 간주)
+function shiftWeekdays(baseDate, n){
+  let d = new Date(baseDate);
+  const step = n >= 0 ? 1 : -1;
+  let remain = Math.abs(n);
+  while (remain > 0) {
+    d = addDays(d, step);
+    if (!isWeekend(d)) remain--;
+  }
+  return d;
+}
+
+/* ===== 데이터 로드 ===== */
 async function loadEmployees(){
   const snaps = await getDocs(collection(db, "employees"));
   const arr = [];
@@ -78,7 +86,6 @@ async function loadEmployees(){
   return arr;
 }
 
-// 기간 내 배정 로드
 async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
   const col = collection(db, "assignments");
   const snaps = await getDocs(col);
@@ -95,17 +102,17 @@ async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
       byEmp[a.empId].push({ id: d.id, ...a });
     }
   });
-  // 같은 업무(task) & 역할(role)이 이어지는 경우 병합(연속일자)
+
+  // 같은 업무(task) & 역할(role)이 연속일 경우 병합
   for (const k of Object.keys(byEmp)) {
     const list = byEmp[k].sort((a,b)=> (a.startDate||"").localeCompare(b.startDate||""));
     const merged = [];
     for (const item of list) {
       const last = merged[merged.length-1];
-      if (last && last.task===item.task && (last.role||"")=== (item.role||"")
-          && addDays(parseYmd(last.endDate),1).toISOString().slice(0,10) === item.startDate) {
-        // 연속이면 끝만 확장
-        last.endDate = item.endDate > last.endDate ? item.endDate : last.endDate;
-        last.allocation = Math.max(last.allocation||1, item.allocation||1); // 보수적 병합
+      const lastEndPlus1 = last ? addDays(parseYmd(last.endDate),1).toISOString().slice(0,10) : "";
+      if (last && last.task===item.task && (last.role||"") === (item.role||"") && lastEndPlus1 === item.startDate) {
+        last.endDate = (item.endDate > last.endDate) ? item.endDate : last.endDate;
+        last.allocation = Math.max(last.allocation||1, item.allocation||1);
       } else {
         merged.push({...item});
       }
@@ -115,7 +122,92 @@ async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
   return byEmp;
 }
 
-// ===== 글로벌 모달(업무 배정 / 역할 편집) =====
+/* ===== 개별 배정 수정 모달(스팬 클릭) ===== */
+function openAssignModal({ emp, initial, onSubmit, onDelete }) {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4";
+  overlay.innerHTML = `
+    <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-lg p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-lg font-bold text-gray-900 dark:text-white">업무 ${initial ? "수정" : "배정"}</h3>
+        <button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" data-close>&times;</button>
+      </div>
+      <div class="text-xs text-gray-500 mb-3">${emp.name} · ${emp.team}</div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm mb-1">업무(Task)</label>
+          <input id="assign-task" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">역할(Role)</label>
+          <input id="assign-role" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm mb-1">시작일</label>
+            <input id="assign-start" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">종료일</label>
+            <input id="assign-end" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">투입 비율 (0~1)</label>
+          <input id="assign-alloc" type="number" min="0" max="1" step="0.1" value="1" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+        </div>
+      </div>
+      <div class="flex justify-between gap-2 mt-4">
+        <div>${initial ? `<button id="assign-delete" class="rounded-lg border px-3 py-1.5 text-rose-600 border-rose-300">삭제</button>` : ""}</div>
+        <div class="flex gap-2">
+          <button class="rounded-lg border px-3 py-1.5" data-close>취소</button>
+          <button class="rounded-lg bg-primary text-white px-4 py-1.5" id="assign-save">저장</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = ()=> overlay.remove();
+  overlay.querySelectorAll("[data-close]").forEach(b=> b.addEventListener("click", close));
+
+  const taskEl = overlay.querySelector("#assign-task");
+  const roleEl = overlay.querySelector("#assign-role");
+  const startEl = overlay.querySelector("#assign-start");
+  const endEl = overlay.querySelector("#assign-end");
+  const allocEl = overlay.querySelector("#assign-alloc");
+
+  if (initial) {
+    taskEl.value = initial.task || "";
+    roleEl.value = initial.role || "";
+    startEl.value = initial.startDate || "";
+    endEl.value = initial.endDate || "";
+    allocEl.value = (initial.allocation ?? 1);
+  }
+
+  overlay.querySelector("#assign-save").addEventListener("click", async ()=>{
+    const payload = {
+      task: taskEl.value.trim(),
+      role: roleEl.value.trim(),
+      startDate: startEl.value,
+      endDate: endEl.value,
+      allocation: parseFloat(allocEl.value || "1") || 1
+    };
+    if (!payload.task || !payload.startDate || !payload.endDate) { alert("업무/기간을 입력하세요."); return; }
+    await onSubmit(payload);
+    close();
+  });
+
+  if (initial) {
+    overlay.querySelector("#assign-delete").addEventListener("click", async ()=>{
+      if (!confirm("이 업무 배정을 삭제할까요?")) return;
+      await onDelete();
+      close();
+    });
+  }
+}
+
+/* ===== 글로벌 모달(여러 인원 업무 배정 / 역할 편집)은 이전 버전과 동일 – calendar 상단 버튼에서 호출됨
+   (파일 길이상 생략 없음: 기존 제공본과 동일하게 작동하며, 이번 변경과 직접 충돌 없음) ===== */
 function openBulkAssignModal({ employees, onAssigned }) {
   const overlay = document.createElement("div");
   overlay.className = "fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4";
@@ -175,9 +267,7 @@ function openBulkAssignModal({ employees, onAssigned }) {
   const filterEl = overlay.querySelector("#emp-filter");
   function renderEmpList(keyword=""){
     const kw = keyword.trim();
-    const items = employees.filter(e=>
-      !kw || (e.name||"").includes(kw) || (e.team||"").includes(kw)
-    );
+    const items = employees.filter(e=> !kw || (e.name||"").includes(kw) || (e.team||"").includes(kw));
     empListEl.innerHTML = items.map(e=>`
       <label class="flex items-center gap-2 py-1">
         <input type="checkbox" value="${e.id}"/>
@@ -241,9 +331,7 @@ function openBulkRoleModal({ employees, onUpdated }) {
   const filterEl = overlay.querySelector("#role-filter");
   function renderList(keyword=""){
     const kw = keyword.trim();
-    const items = employees.filter(e=>
-      !kw || (e.name||"").includes(kw) || (e.team||"").includes(kw)
-    );
+    const items = employees.filter(e=> !kw || (e.name||"").includes(kw) || (e.team||"").includes(kw));
     listEl.innerHTML = items.map(e=>`
       <label class="flex items-center gap-2 py-1">
         <input type="checkbox" value="${e.id}"/>
@@ -259,102 +347,13 @@ function openBulkRoleModal({ employees, onUpdated }) {
     if (!ids.length) { alert("인원을 선택하세요."); return; }
     const val = overlay.querySelector("#role-value").value.trim();
     if (!val) { alert("역할을 입력하세요."); return; }
-
-    for (const id of ids) {
-      await updateDoc(doc(db, "employees", id), { primaryRole: val });
-    }
+    for (const id of ids) { await updateDoc(doc(db, "employees", id), { primaryRole: val }); }
     close();
     await onUpdated();
   });
 }
 
-// ===== 개별 수정 모달(스팬 클릭) =====
-function openAssignModal({ emp, initial, onSubmit, onDelete }) {
-  const overlay = document.createElement("div");
-  overlay.className = "fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4";
-  overlay.innerHTML = `
-    <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-lg p-4">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-lg font-bold text-gray-900 dark:text-white">업무 ${initial ? "수정" : "배정"}</h3>
-        <button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" data-close>&times;</button>
-      </div>
-      <div class="text-xs text-gray-500 mb-3">${emp.name} · ${emp.team}</div>
-      <div class="space-y-3">
-        <div>
-          <label class="block text-sm mb-1">업무(Task)</label>
-          <input id="assign-task" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
-        </div>
-        <div>
-          <label class="block text-sm mb-1">역할(Role)</label>
-          <input id="assign-role" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-sm mb-1">시작일</label>
-            <input id="assign-start" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
-          </div>
-          <div>
-            <label class="block text-sm mb-1">종료일</label>
-            <input id="assign-end" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
-          </div>
-        </div>
-        <div>
-          <label class="block text-sm mb-1">투입 비율 (0~1)</label>
-          <input id="assign-alloc" type="number" min="0" max="1" step="0.1" value="1" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
-        </div>
-      </div>
-      <div class="flex justify-between gap-2 mt-4">
-        <div>
-          ${initial ? `<button id="assign-delete" class="rounded-lg border px-3 py-1.5 text-rose-600 border-rose-300">삭제</button>` : ""}
-        </div>
-        <div class="flex gap-2">
-          <button class="rounded-lg border px-3 py-1.5" data-close>취소</button>
-          <button class="rounded-lg bg-primary text-white px-4 py-1.5" id="assign-save">저장</button>
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  const close = ()=> overlay.remove();
-  overlay.querySelectorAll("[data-close]").forEach(b=> b.addEventListener("click", close));
-
-  const taskEl = overlay.querySelector("#assign-task");
-  const roleEl = overlay.querySelector("#assign-role");
-  const startEl = overlay.querySelector("#assign-start");
-  const endEl = overlay.querySelector("#assign-end");
-  const allocEl = overlay.querySelector("#assign-alloc");
-
-  if (initial) {
-    taskEl.value = initial.task || "";
-    roleEl.value = initial.role || "";
-    startEl.value = initial.startDate || "";
-    endEl.value = initial.endDate || "";
-    allocEl.value = (initial.allocation ?? 1);
-  }
-
-  overlay.querySelector("#assign-save").addEventListener("click", async ()=>{
-    const payload = {
-      task: taskEl.value.trim(),
-      role: roleEl.value.trim(),
-      startDate: startEl.value,
-      endDate: endEl.value,
-      allocation: parseFloat(allocEl.value || "1") || 1
-    };
-    if (!payload.task || !payload.startDate || !payload.endDate) { alert("업무/기간을 입력하세요."); return; }
-    await onSubmit(payload);
-    close();
-  });
-
-  if (initial) {
-    overlay.querySelector("#assign-delete").addEventListener("click", async ()=>{
-      if (!confirm("이 업무 배정을 삭제할까요?")) return;
-      await onDelete();
-      close();
-    });
-  }
-}
-
-// ===== 렌더링 =====
+/* ===== 렌더 ===== */
 export async function renderCalendarPage(container){
   container.innerHTML = `
     <div class="bg-white dark:bg-gray-900 p-4 md:p-6 rounded-xl shadow-sm">
@@ -388,17 +387,22 @@ export async function renderCalendarPage(container){
   const startInput = document.getElementById("start-date");
   startInput.value = fmt(viewStartDate);
 
+  // 상단 버튼들
   document.getElementById("prev-month").onclick = () => {
-    viewStartDate = addDays(viewStartDate, -28); startInput.value = fmt(viewStartDate); draw();
+    viewStartDate = shiftWeekdays(viewStartDate, -22);
+    draw();
   };
   document.getElementById("next-month").onclick = () => {
-    viewStartDate = addDays(viewStartDate, 28); startInput.value = fmt(viewStartDate); draw();
+    viewStartDate = shiftWeekdays(viewStartDate, 22);
+    draw();
   };
   document.getElementById("today-btn").onclick = () => {
-    viewStartDate = new Date(); startInput.value = fmt(viewStartDate); draw();
+    viewStartDate = new Date();
+    draw();
   };
   document.getElementById("apply-range").onclick = () => {
-    viewStartDate = parseYmd(startInput.value); draw();
+    viewStartDate = parseYmd(startInput.value);
+    draw(true);
   };
 
   document.getElementById("add-holiday").onclick = async ()=>{
@@ -417,35 +421,68 @@ export async function renderCalendarPage(container){
     }
   };
 
-  // 글로벌 모달 버튼
   document.getElementById("bulk-assign").onclick = async ()=>{
     const employees = await loadEmployees();
-    openBulkAssignModal({
-      employees,
-      onAssigned: async ()=> { await draw(); }
-    });
+    openBulkAssignModal({ employees, onAssigned: async ()=> { await draw(); } });
   };
   document.getElementById("bulk-role").onclick = async ()=>{
     const employees = await loadEmployees();
-    openBulkRoleModal({
-      employees,
-      onUpdated: async ()=> { await draw(); }
-    });
+    openBulkRoleModal({ employees, onUpdated: async ()=> { await draw(); } });
   };
 
-  async function draw(){
-    // 날짜들(평일만, 공휴일 표시 플래그 포함)
-    const days = await getWeekdaysIncludingHolidays(viewStartDate, VIEW_WORKDAYS);
+  // 스크롤 동기화 + 무한 확장
+  const headerHost = document.getElementById("calendar-header");
+  const wrap = document.getElementById("calendar-wrap");
+  function syncScroll(from, to){ to.scrollLeft = from.scrollLeft; }
+  headerHost.addEventListener("scroll", ()=> syncScroll(headerHost, wrap));
+  wrap.addEventListener("scroll", ()=> syncScroll(wrap, headerHost));
+
+  // 임계치 근접 시 확장
+  function attachInfiniteScroll(){
+    const threshold = 200; // px
+
+    const handler = async (el, dir) => {
+      // 현재 스크롤 위치 기억
+      const prevLeft = el.scrollLeft;
+      const prevWidth = el.scrollWidth;
+
+      if (dir === "right") {
+        // 뒤로 22 평일 추가
+        viewWorkdays += 22;
+        await draw(false, { maintainLeft: true, prevLeft, prevWidth, el });
+      } else {
+        // 앞으로 22 평일 추가 (시작점을 앞으로 이동)
+        viewStartDate = shiftWeekdays(viewStartDate, -22);
+        viewWorkdays += 22;
+        await draw(false, { prepend: true, prevLeft, prevWidth, el });
+      }
+    };
+
+    const onScroll = async ()=>{
+      // 오른쪽 끝 근접
+      if (wrap.scrollLeft + wrap.clientWidth > wrap.scrollWidth - threshold) {
+        await handler(wrap, "right");
+      }
+      // 왼쪽 끝 근접
+      if (wrap.scrollLeft < threshold) {
+        await handler(wrap, "left");
+      }
+    };
+    wrap.removeEventListener("scroll", onScroll); // 중복 방지
+    wrap.addEventListener("scroll", onScroll);
+  }
+
+  async function draw(resetInput=false, keepScrollParams=null){
+    const days = await getWeekdaysIncludingHolidays(viewStartDate, viewWorkdays);
+    if (resetInput) startInput.value = fmt(viewStartDate);
+
     const startYmd = fmt(days[0].date);
     const endYmd = fmt(days[days.length-1].date);
-
-    // 직원/배정 로드
     const employees = await loadEmployees();
     const empIds = employees.map(e=>e.id);
     const assignmentsByEmp = await loadAssignmentsInRange(startYmd, endYmd, empIds);
 
-    // ===== 헤더 렌더 =====
-    const headerHost = document.getElementById("calendar-header");
+    /* === 헤더 === */
     headerHost.innerHTML = "";
     // 1행: 월 스팬
     const monthRow = document.createElement("div");
@@ -456,17 +493,13 @@ export async function renderCalendarPage(container){
     memberHead.textContent = "팀원 (이름 / 역할)";
     monthRow.appendChild(memberHead);
 
-    // 월 별 그룹
     const monthGroups = [];
     for (let i=0;i<days.length;i++){
       const d = days[i].date;
       const key = `${d.getFullYear()}-${d.getMonth()+1}`;
       const prev = monthGroups[monthGroups.length-1];
-      if (!prev || prev.key !== key) {
-        monthGroups.push({ key, y: d.getFullYear(), m: d.getMonth()+1, count: 1 });
-      } else {
-        prev.count++;
-      }
+      if (!prev || prev.key !== key) monthGroups.push({ key, y: d.getFullYear(), m: d.getMonth()+1, count: 1 });
+      else prev.count++;
     }
     monthGroups.forEach(gr=>{
       const el = document.createElement("div");
@@ -482,11 +515,10 @@ export async function renderCalendarPage(container){
     dayRow.className = "flex calendar-header-sticky border-b border-gray-200 dark:border-gray-800";
     const memberPad = document.createElement("div");
     memberPad.className = "calendar-left-sticky member-col px-3 py-2 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800";
-    memberPad.innerHTML = `<div class="text-xs text-gray-500">더블클릭: 해당일 업무 배정</div>`;
+    memberPad.innerHTML = `<div class="text-xs text-gray-500">스팬 클릭: 수정, 셀 더블클릭: 배정</div>`;
     dayRow.appendChild(memberPad);
 
     days.forEach(({date, isHoliday})=>{
-      const ymd = fmt(date);
       const el = document.createElement("div");
       el.className = "calendar-cell px-0 py-1 text-center text-[11px] font-medium text-gray-700 dark:text-gray-200";
       el.innerHTML = `${DAYNAMES[date.getDay()]}<br>${date.getDate()}`;
@@ -495,29 +527,25 @@ export async function renderCalendarPage(container){
     });
     headerHost.appendChild(dayRow);
 
-    // ===== 본문 렌더 =====
-    const wrap = document.getElementById("calendar-wrap");
+    /* === 본문 === */
     wrap.innerHTML = "";
-
     employees.forEach(emp=>{
       const row = document.createElement("div");
       row.className = "row-track border-b border-gray-100 dark:border-gray-800";
 
-      // 좌측(팀원+역할)
+      // 좌측 팀원 + 역할
       const left = document.createElement("div");
       left.className = "calendar-left-sticky member-col px-3 py-2 bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800";
-      // 역할: employee.primaryRole 우선, 없으면 기간 내 배정 역할들의 유니크 요약
       const roles = new Set();
       (assignmentsByEmp[emp.id]||[]).forEach(a=> { if (a.role) roles.add(a.role); });
       const roleText = emp.primaryRole || (roles.size ? Array.from(roles).slice(0,3).join(", ") : "-");
-
       left.innerHTML = `
         <div class="text-sm font-semibold text-gray-900 dark:text-white">${emp.name} <span class="text-xs text-gray-500">(${emp.team||"미지정"})</span></div>
         <div class="text-xs text-gray-600 dark:text-gray-400">역할: ${roleText}</div>
       `;
       row.appendChild(left);
 
-      // 데이터 셀 (빈 셀들: 클릭/더블클릭 이벤트용)
+      // 데이터 셀 (더블클릭 시 해당일 배정)
       const dataHost = document.createElement("div");
       dataHost.className = "flex";
       days.forEach(({date, isHoliday})=>{
@@ -526,7 +554,6 @@ export async function renderCalendarPage(container){
         cell.className = "calendar-cell";
         if (isHoliday) cell.classList.add("holiday-bg");
 
-        // 더블클릭 시 해당 일자부터 기본 배정 모달
         cell.addEventListener("dblclick", ()=>{
           openAssignModal({
             emp,
@@ -542,11 +569,10 @@ export async function renderCalendarPage(container){
       });
       row.appendChild(dataHost);
 
-      // ===== 연속 스팬 막대 깔기 (absolute) =====
+      // 연속 스팬 생성
       const rangeAssignments = assignmentsByEmp[emp.id] || [];
-      // 스팬 생성 함수
       function addSpan(a){
-        // 캘린더 범위 내로 절단
+        // 범위 내 좌우 절단
         const startIdx = Math.max(0, days.findIndex(d=> fmt(d.date) >= a.startDate));
         const endIdx = Math.min(days.length-1, (()=> {
           let idx = -1;
@@ -557,13 +583,13 @@ export async function renderCalendarPage(container){
 
         const span = document.createElement("div");
         span.className = "task-span";
-        const width = (endIdx - startIdx + 1) * CELL_PX - 4; // -4 padding
-        const leftPx = startIdx * CELL_PX + (document.querySelector(".member-col")?.offsetWidth || 260); // 좌측 스티키 폭만큼 이동
-        span.style.left = `${leftPx + 2}px`;
+        const width = (endIdx - startIdx + 1) * CELL_PX - 6; // -6 padding
+        const leftPx = (document.querySelector(".member-col")?.offsetWidth || 260) + startIdx * CELL_PX + 3;
+        span.style.left = `${leftPx}px`;
         span.style.width = `${width}px`;
         span.title = `${a.task} (${a.role||"-"}) ${a.startDate}~${a.endDate} · ${Math.round((a.allocation||1)*100)}%`;
+        span.textContent = a.task || ""; // ★ 막대 라벨(업무명)
 
-        // 클릭 → 수정/삭제
         span.addEventListener("click", ()=>{
           openAssignModal({
             emp, initial: a,
@@ -578,14 +604,30 @@ export async function renderCalendarPage(container){
           });
         });
 
-        // 행(row-track) 기준 absolute이므로 row에 붙임
         row.appendChild(span);
       }
-
       rangeAssignments.forEach(addSpan);
+
       wrap.appendChild(row);
     });
+
+    // 무한 스크롤(임계 접근 시 확장)
+    attachInfiniteScroll();
+
+    // 스크롤 보정(앞쪽 prepend 시 기존 위치 유지)
+    if (keepScrollParams) {
+      const { prepend, prevLeft, prevWidth, el } = keepScrollParams;
+      if (prepend) {
+        const added = wrap.scrollWidth - prevWidth;
+        el.scrollLeft = prevLeft + added; // 앞에 추가된 만큼 보정
+        headerHost.scrollLeft = el.scrollLeft;
+      } else if (keepScrollParams.maintainLeft) {
+        el.scrollLeft = prevLeft; // 뒤에 추가는 유지
+        headerHost.scrollLeft = el.scrollLeft;
+      }
+    }
   }
 
-  await draw();
+  // 외부에서 다시 그릴 때도 무한 스크롤 핸들러가 살아있도록 최초 draw에서 attach
+  await draw(true);
 }
