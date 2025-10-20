@@ -1,15 +1,10 @@
 // js/calendar.js
-// 가로형 평일 달력 렌더러 + 투입/역할/업무 관리
-// - 휴일: 헤더/셀 붉은 강조
-// - 업무 배정: 모달 UI
-
 import { db } from "./firebase.js";
 import { requireAuthAndTeams } from "./auth.js";
 import {
   collection, query, where, getDocs, addDoc, doc, setDoc, getDoc
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-// ---- 유틸 ----
 function fmt(d){ return d.toISOString().slice(0,10); }
 function parseYmd(s){ const [y,m,dd]=s.split("-").map(Number); return new Date(y, m-1, dd); }
 function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
@@ -18,6 +13,7 @@ function isWeekend(d){ const day=d.getDay(); return day===0 || day===6; }
 let viewStartDate = new Date();
 const VIEW_BUSINESS_DAYS = 22;
 
+// 대한민국 빨간날(샘플: 2024~2026) — 필요시 연도 추가 가능
 const STATIC_HOLIDAYS = {
   2024: ["2024-01-01","2024-02-09","2024-02-12","2024-03-01","2024-04-10","2024-05-05","2024-05-06","2024-06-06","2024-08-15","2024-09-16","2024-09-17","2024-09-18","2024-10-03","2024-10-09","2024-12-25"],
   2025: ["2025-01-01","2025-01-28","2025-01-29","2025-01-30","2025-03-01","2025-05-05","2025-06-06","2025-08-15","2025-10-03","2025-10-06","2025-10-09","2025-12-25"],
@@ -60,38 +56,12 @@ async function getBusinessDaysRange(startDate, nBusiness) {
   return days;
 }
 
-async function loadEmployees(teams, isAdmin){
-  const col = collection(db, "employees");
-
-  async function fetchByTeams(teamList){
-    if (!teamList.length) return [];
-    if (teamList.length <= 10) {
-      const q = query(col, where("team","in", teamList));
-      const snaps = await getDocs(q);
-      const arr = [];
-      snaps.forEach(docu => arr.push({ id: docu.id, ...docu.data() }));
-      return arr;
-    }
-    const chunks = [];
-    for (let i=0;i<teamList.length;i+=10) chunks.push(teamList.slice(i,i+10));
-    const all = [];
-    for (const c of chunks) {
-      const q = query(col, where("team","in", c));
-      const snaps = await getDocs(q);
-      snaps.forEach(docu => all.push({ id: docu.id, ...docu.data() }));
-    }
-    return all;
-  }
-
-  let out = [];
-  if (isAdmin) {
-    const snaps = await getDocs(col);
-    snaps.forEach(d=> out.push({ id:d.id, ...d.data() }));
-  } else {
-    out = await fetchByTeams(teams);
-  }
-  out.sort((a,b)=> (a.team||"").localeCompare(b.team||"") || (a.name||"").localeCompare(b.name||""));
-  return out;
+async function loadEmployees(){  // 팀 필터 없이 전체 (DEV 규칙과 일치)
+  const snaps = await getDocs(collection(db, "employees"));
+  const arr = [];
+  snaps.forEach(d=> arr.push({ id:d.id, ...d.data() }));
+  arr.sort((a,b)=> (a.team||"").localeCompare(b.team||"") || (a.name||"").localeCompare(b.name||""));
+  return arr;
 }
 
 async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
@@ -113,11 +83,10 @@ async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
   return byEmp;
 }
 
-// ---- 업무 배정 모달 ----
+// 업무 배정 모달
 function openAssignModal({ emp, dateYmd, onSubmit }) {
   const overlay = document.createElement("div");
   overlay.className = "fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4";
-
   overlay.innerHTML = `
     <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-lg p-4">
       <div class="flex items-center justify-between mb-2">
@@ -125,7 +94,6 @@ function openAssignModal({ emp, dateYmd, onSubmit }) {
         <button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" data-close>&times;</button>
       </div>
       <div class="text-xs text-gray-500 mb-3">${emp.name} · ${emp.team} · ${dateYmd}</div>
-
       <div class="space-y-3">
         <div>
           <label class="block text-sm mb-1">역할</label>
@@ -150,14 +118,12 @@ function openAssignModal({ emp, dateYmd, onSubmit }) {
           <input id="assign-alloc" type="number" min="0" max="1" step="0.1" value="1" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
         </div>
       </div>
-
       <div class="flex justify-end gap-2 mt-4">
         <button class="rounded-lg border px-3 py-1.5" data-close>취소</button>
         <button class="rounded-lg bg-primary text-white px-4 py-1.5" id="assign-save">저장</button>
       </div>
     </div>
   `;
-
   document.body.appendChild(overlay);
   const close = ()=> overlay.remove();
   overlay.querySelectorAll("[data-close]").forEach(b=> b.addEventListener("click", close));
@@ -174,13 +140,11 @@ function openAssignModal({ emp, dateYmd, onSubmit }) {
     const endDate = endEl.value;
     const allocation = parseFloat(overlay.querySelector("#assign-alloc").value || "1");
     if (!task || !startDate || !endDate) { alert("업무/기간을 입력하세요."); return; }
-
     await onSubmit({ role, task, startDate, endDate, allocation: isNaN(allocation)?1:allocation });
     close();
   });
 }
 
-// ---- 렌더링 ----
 export async function renderCalendarPage(container){
   container.innerHTML = `
     <div class="bg-white dark:bg-gray-900 p-4 md:p-6 rounded-xl shadow-sm">
@@ -205,30 +169,11 @@ export async function renderCalendarPage(container){
     </div>
   `;
 
-  const { currentTeams, isAdmin } = await requireAuthAndTeams();
-
-  const sd = document.getElementById("start-date");
-  sd.value = fmt(viewStartDate);
-
-  document.getElementById("prev-month").onclick = () => {
-    viewStartDate = addDays(viewStartDate, -28);
-    sd.value = fmt(viewStartDate);
-    draw();
-  };
-  document.getElementById("next-month").onclick = () => {
-    viewStartDate = addDays(viewStartDate, 28);
-    sd.value = fmt(viewStartDate);
-    draw();
-  };
-  document.getElementById("today-btn").onclick = () => {
-    viewStartDate = new Date();
-    sd.value = fmt(viewStartDate);
-    draw();
-  };
-  document.getElementById("apply-range").onclick = () => {
-    viewStartDate = parseYmd(sd.value);
-    draw();
-  };
+  document.getElementById("start-date").value = fmt(viewStartDate);
+  document.getElementById("prev-month").onclick = () => { viewStartDate = addDays(viewStartDate, -28); document.getElementById("start-date").value = fmt(viewStartDate); draw(); };
+  document.getElementById("next-month").onclick = () => { viewStartDate = addDays(viewStartDate, 28); document.getElementById("start-date").value = fmt(viewStartDate); draw(); };
+  document.getElementById("today-btn").onclick = () => { viewStartDate = new Date(); document.getElementById("start-date").value = fmt(viewStartDate); draw(); };
+  document.getElementById("apply-range").onclick = () => { viewStartDate = parseYmd(document.getElementById("start-date").value); draw(); };
 
   document.getElementById("add-holiday").onclick = async ()=>{
     const ymd = prompt("추가할 휴일(YYYY-MM-DD):");
@@ -240,7 +185,7 @@ export async function renderCalendarPage(container){
     if (!days.includes(ymd)) {
       await setDoc(ref, { days: [...days, ymd] }, { merge:true });
       alert("추가됨");
-      draw();
+      draw(); // 즉시 반영
     } else {
       alert("이미 존재하는 날짜");
     }
@@ -251,14 +196,14 @@ export async function renderCalendarPage(container){
     const title = `${days[0].getFullYear()}년 ${days[0].getMonth()+1}월 ~ ${days[days.length-1].getFullYear()}년 ${days[days.length-1].getMonth()+1}월 (영업일 ${days.length}일)`;
     document.getElementById("calendar-title").textContent = title;
 
-    const employees = await loadEmployees(currentTeams, isAdmin);
+    const employees = await loadEmployees();
     const empIds = employees.map(e=>e.id);
     const assignmentsByEmp = await loadAssignmentsInRange(fmt(days[0]), fmt(days[days.length-1]), empIds);
 
     const wrap = document.getElementById("calendar-wrap");
     wrap.innerHTML = "";
 
-    // 휴일 빠른 조회를 위해 맵 생성
+    // 연도별 휴일 Set (STATIC+Firestore 병합)
     const holidaySetByYear = {};
     for (const d of days) {
       const y = d.getFullYear();
@@ -290,8 +235,7 @@ export async function renderCalendarPage(container){
       el.className = "calendar-cell px-3 py-2 text-center text-sm font-semibold text-gray-700 dark:text-gray-200";
       el.textContent = label;
       if (holidaySetByYear[d.getFullYear()]?.has(ymd)) {
-        el.classList.add("holiday-label");
-        el.classList.add("holiday-bg");
+        el.classList.add("holiday-label","holiday-bg");
       }
       headerRow.appendChild(el);
     });
@@ -323,9 +267,7 @@ export async function renderCalendarPage(container){
         const ymd = fmt(day);
         const cell = document.createElement("div");
         cell.className = "calendar-cell px-2 py-2 text-sm text-gray-800 dark:text-gray-100 align-top";
-        if (holidaySetByYear[day.getFullYear()]?.has(ymd)) {
-          cell.classList.add("holiday-bg");
-        }
+        if (holidaySetByYear[day.getFullYear()]?.has(ymd)) cell.classList.add("holiday-bg");
 
         empAssigns.forEach(a=>{
           if (ymd >= a.startDate && ymd <= a.endDate) {
@@ -337,7 +279,6 @@ export async function renderCalendarPage(container){
           }
         });
 
-        // 더블클릭 → 업무 배정 모달
         cell.addEventListener("dblclick", ()=>{
           openAssignModal({
             emp, dateYmd: ymd,
@@ -345,7 +286,6 @@ export async function renderCalendarPage(container){
               await addDoc(collection(db, "assignments"), {
                 empId: emp.id, role, task, startDate, endDate, allocation
               });
-              // 즉시 반영
               const chip = document.createElement("div");
               chip.className = "task-chip";
               chip.textContent = task;
