@@ -1,58 +1,65 @@
-/* 가로 달력 레이아웃 보조 스타일 */
-
-.calendar-grid {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  max-height: 70vh;
+/* 공통 */
+:root {
+  color-scheme: light dark;
 }
 
-.left-rail {
-  border-right: 1px solid #e5e7eb;
-  min-width: 260px;
-  max-height: 70vh;
-  overflow: auto;
+/* 달력 컨테이너: 가로 스크롤 */
+.horizontal-calendar-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
 }
 
-.calendar-scroll {
-  overflow: auto;
-  max-height: 70vh;
+/* 상단 날짜 헤더 sticky */
+.calendar-header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: inherit;
 }
 
-#date-header {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 160px; /* 날짜 컬럼 너비 */
-  border-bottom: 1px solid #e5e7eb;
+/* 좌측 팀원 영역 sticky */
+.calendar-left-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  background: inherit;
 }
 
-#calendar-body {
-  display: grid;
-  grid-auto-rows: minmax(48px, auto);
+/* 셀 기본 */
+.calendar-cell {
+  min-width: 140px; /* 가로 셀 폭 */
+  border-right: 1px solid rgba(0,0,0,0.06);
 }
 
-.cell {
-  width: 160px;
-  min-height: 48px;
-  border-bottom: 1px solid #f1f5f9;
-  border-right: 1px solid #f1f5f9;
-  padding: 6px;
+/* 팀원 열 폭 */
+.member-col {
+  min-width: 220px;
+  max-width: 280px;
+}
+
+/* 역할 열 폭 */
+.role-col {
+  min-width: 160px;
+  max-width: 220px;
+}
+
+/* 업무 카드 */
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 8px;
   font-size: 12px;
-  line-height: 1.2;
-  overflow: hidden;
+  line-height: 1.1;
+  border: 1px solid rgba(17, 115, 212, 0.15);
+  background: rgba(17, 115, 212, 0.08);
+  margin: 2px;
+  user-select: none;
 }
 
-.badge-holiday {
-  display: inline-block;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 9999px;
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.btn-mini {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 2px 6px;
-  font-size: 11px;
+/* 공휴일 상단 헤더 강조 */
+.holiday-label {
+  color: #e11d48 !important;
+  font-weight: 700;
 }
