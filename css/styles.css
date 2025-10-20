@@ -63,3 +63,8 @@
   color: #e11d48 !important;
   font-weight: 700;
 }
+
+/* 공휴일 셀 배경 */
+.holiday-bg {
+  background: rgba(225, 29, 72, 0.08); /* rose-600 8% */
+}
