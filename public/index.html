@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html class="light" lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HR Man-Month Dashboard</title>
+
+  <!-- Tailwind (운영 시 self-host 권장) -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#1173d4",
+            "background-light": "#f6f7f8",
+            "background-dark": "#101922",
+            holiday: "#ef4444"
+          },
+          fontFamily: { "display": ["Inter"] },
+          borderRadius: {"DEFAULT":"0.25rem","lg":"0.5rem","xl":"0.75rem","full":"9999px"}
+        }
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display">
+  <div class="relative flex min-h-screen w-full">
+    <!-- Sidebar -->
+    <aside class="w-64 flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
+      <div class="p-6">
+        <h1 class="text-xl font-bold text-gray-800 dark:text-white">HR Dashboard</h1>
+        <div class="mt-2 text-xs text-gray-500">
+          <span id="auth-user">로그인 필요</span>
+        </div>
+      </div>
+      <nav class="flex-1 px-4 py-2 space-y-2">
+        <a data-route="#/calendar" class="navlink active flex items-center gap-3 px-4 py-2 rounded-lg bg-primary/10 text-primary" href="#/calendar">
+          <span class="material-symbols-outlined">calendar_month</span>
+          <span class="font-medium">Man-Month Calendar</span>
+        </a>
+        <a data-route="#/manmonth" class="navlink flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800" href="#/manmonth">
+          <span class="material-symbols-outlined">calculate</span>
+          <span class="font-medium">Calculating Man-Month</span>
+        </a>
+        <a data-route="#/hr" class="navlink flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800" href="#/hr">
+          <span class="material-symbols-outlined">groups</span>
+          <span class="font-medium">HR</span>
+        </a>
+      </nav>
+
+      <div class="px-4 pb-4 space-y-2">
+        <button id="btn-login"  class="w-full rounded-lg px-3 py-2 text-sm border hover:bg-gray-50 dark:hover:bg-gray-800">Google 로그인</button>
+        <button id="btn-logout" class="w-full rounded-lg px-3 py-2 text-sm border hover:bg-gray-50 dark:hover:bg-gray-800 hidden">로그아웃</button>
+        <button id="btn-dark"   class="w-full rounded-lg px-3 py-2 text-sm border hover:bg-gray-50 dark:hover:bg-gray-800">다크모드</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 p-6 lg:p-8">
+      <div class="max-w-[1400px] mx-auto">
+        <!-- Heading -->
+        <div class="flex flex-wrap justify-between gap-3 mb-6">
+          <p id="page-title" class="text-gray-800 dark:text-white text-3xl lg:text-4xl font-black leading-tight tracking-[-0.02em]">Man-Month Calendar</p>
+
+          <div class="flex gap-2 items-center">
+            <!-- CSV Import -->
+            <label class="relative inline-flex items-center">
+              <input type="file" id="csv-file" accept=".csv" class="hidden" />
+              <span class="rounded-lg border px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">CSV 업로드</span>
+            </label>
+            <select id="csv-target" class="rounded-lg border px-2 py-2 text-sm">
+              <option value="employees">employees</option>
+              <option value="assignments">assignments</option>
+              <option value="holidays">holidays</option>
+            </select>
+            <button id="btn-import" class="rounded-lg bg-primary text-white px-3 py-2 text-sm">일괄 반영</button>
+          </div>
+        </div>
+
+        <!-- Views -->
+        <section id="view-calendar" class="view">
+          <div class="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm mb-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <button id="prev-week" class="text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full p-2">
+                <span class="material-symbols-outlined">chevron_left</span>
+              </button>
+              <button id="today" class="rounded-md border px-3 py-1 text-sm">오늘</button>
+              <button id="next-week" class="text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full p-2">
+                <span class="material-symbols-outlined">chevron_right</span>
+              </button>
+            </div>
+            <p id="range-label" class="text-gray-800 dark:text-white text-xl font-bold"></p>
+            <div class="flex items-center gap-2">
+              <input type="date" id="jump-date" class="rounded-md border px-2 py-1 text-sm"/>
+              <button id="btn-jump" class="rounded-md bg-primary text-white px-3 py-1 text-sm">이동</button>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-gray-900 rounded-xl shadow-sm overflow-hidden">
+            <div class="calendar-grid">
+              <!-- Left rail -->
+              <div class="left-rail">
+                <div class="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b px-3 py-2 font-semibold">팀원 / 역할</div>
+                <div id="member-list" class="p-3 space-y-2"></div>
+                <div class="p-3">
+                  <button id="btn-add-member" class="w-full rounded-md border px-3 py-2 text-sm">팀원 추가</button>
+                </div>
+              </div>
+              <!-- Scroll area -->
+              <div class="calendar-scroll">
+                <div id="date-header" class="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b"></div>
+                <div id="calendar-body"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-manmonth" class="view hidden">
+          <div class="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm">
+            <div class="flex flex-wrap items-end gap-3 mb-4">
+              <div>
+                <label class="text-sm">시작일</label>
+                <input type="date" id="mm-start" class="rounded-md border px-2 py-1 text-sm"/>
+              </div>
+              <div>
+                <label class="text-sm">종료일</label>
+                <input type="date" id="mm-end" class="rounded-md border px-2 py-1 text-sm"/>
+              </div>
+              <div>
+                <label class="text-sm">대상자(선택)</label>
+                <select id="mm-employee" class="rounded-md border px-2 py-1 text-sm">
+                  <option value="">전체</option>
+                </select>
+              </div>
+              <button id="btn-mm-calc" class="rounded-md bg-primary text-white px-3 py-2 text-sm">계산</button>
+            </div>
+            <div id="mm-result" class="text-sm"></div>
+            <p class="text-xs text-gray-500 mt-2">* 기준: 평일 하루 = 1 man-day, 20 man-day = 1 man-month</p>
+          </div>
+        </section>
+
+        <section id="view-hr" class="view hidden">
+          <div class="grid lg:grid-cols-2 gap-4">
+            <div class="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm">
+              <p class="font-bold mb-3">인력 관리</p>
+              <div class="grid grid-cols-2 gap-2 mb-3">
+                <input id="emp-name" class="rounded-md border px-2 py-1 text-sm" placeholder="이름"/>
+                <input id="emp-team" class="rounded-md border px-2 py-1 text-sm" placeholder="소속/팀"/>
+                <input id="emp-rank" class="rounded-md border px-2 py-1 text-sm" placeholder="직급(예: 대리)"/>
+                <select id="emp-eval" class="rounded-md border px-2 py-1 text-sm">
+                  <option value="">평가</option><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option>
+                </select>
+                <input id="emp-joined" type="date" class="rounded-md border px-2 py-1 text-sm"/>
+                <input id="emp-left"   type="date" class="rounded-md border px-2 py-1 text-sm" placeholder="퇴사일(옵션)"/>
+              </div>
+              <div class="flex gap-2 mb-3">
+                <button id="btn-emp-add" class="rounded-md bg-primary text-white px-3 py-2 text-sm">등록</button>
+                <button id="btn-emp-refresh" class="rounded-md border px-3 py-2 text-sm">새로고침</button>
+              </div>
+              <div id="emp-table" class="overflow-auto max-h-[360px] text-sm"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm">
+              <p class="font-bold mb-3">프리셋 관리 (역할/업무/휴일)</p>
+              <div class="grid grid-cols-2 gap-2 mb-3">
+                <input id="preset-role" class="rounded-md border px-2 py-1 text-sm" placeholder="역할 추가"/>
+                <input id="preset-task" class="rounded-md border px-2 py-1 text-sm" placeholder="업무 추가"/>
+                <input id="preset-holiday-date" type="date" class="rounded-md border px-2 py-1 text-sm"/>
+                <input id="preset-holiday-name" class="rounded-md border px-2 py-1 text-sm" placeholder="휴일명"/>
+              </div>
+              <div class="flex gap-2 mb-3">
+                <button id="btn-add-role" class="rounded-md border px-3 py-2 text-sm">역할 추가</button>
+                <button id="btn-add-task" class="rounded-md border px-3 py-2 text-sm">업무 추가</button>
+                <button id="btn-add-holiday" class="rounded-md border px-3 py-2 text-sm">휴일 추가</button>
+              </div>
+              <div class="grid grid-cols-3 gap-3 text-sm">
+                <div>
+                  <p class="font-semibold mb-1">역할</p>
+                  <ul id="list-roles" class="space-y-1"></ul>
+                </div>
+                <div>
+                  <p class="font-semibold mb-1">업무</p>
+                  <ul id="list-tasks" class="space-y-1"></ul>
+                </div>
+                <div>
+                  <p class="font-semibold mb-1">휴일</p>
+                  <ul id="list-holidays" class="space-y-1"></ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm lg:col-span-2">
+              <p class="font-bold mb-3">배치 등록 (팀원·역할·업무·기간)</p>
+              <div class="grid md:grid-cols-5 gap-2 mb-3">
+                <select id="as-emp" class="rounded-md border px-2 py-1 text-sm"></select>
+                <select id="as-role" class="rounded-md border px-2 py-1 text-sm"></select>
+                <select id="as-task" class="rounded-md border px-2 py-1 text-sm"></select>
+                <input type="date" id="as-start" class="rounded-md border px-2 py-1 text-sm"/>
+                <input type="date" id="as-end" class="rounded-md border px-2 py-1 text-sm"/>
+              </div>
+              <div class="flex gap-2 mb-3">
+                <button id="btn-as-add" class="rounded-md bg-primary text-white px-3 py-2 text-sm">등록</button>
+                <button id="btn-as-refresh" class="rounded-md border px-3 py-2 text-sm">새로고침</button>
+              </div>
+              <div id="as-table" class="overflow-auto max-h-[300px] text-sm"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- 앱 스크립트들 (ESM) -->
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

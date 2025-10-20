@@ -1,0 +1,58 @@
+/* 가로 달력 레이아웃 보조 스타일 */
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  max-height: 70vh;
+}
+
+.left-rail {
+  border-right: 1px solid #e5e7eb;
+  min-width: 260px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.calendar-scroll {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+#date-header {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 160px; /* 날짜 컬럼 너비 */
+  border-bottom: 1px solid #e5e7eb;
+}
+
+#calendar-body {
+  display: grid;
+  grid-auto-rows: minmax(48px, auto);
+}
+
+.cell {
+  width: 160px;
+  min-height: 48px;
+  border-bottom: 1px solid #f1f5f9;
+  border-right: 1px solid #f1f5f9;
+  padding: 6px;
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: hidden;
+}
+
+.badge-holiday {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.btn-mini {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
