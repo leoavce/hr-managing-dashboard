@@ -1,13 +1,9 @@
 // js/auth.js
-// Firebase Auth UI 로직 및 세션 제어 (admins/{uid} 읽기 허용 규칙에 맞춰 동작)
-
 import { auth, googleProvider, db } from "./firebase.js";
 import {
   signInWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import {
-  doc, getDoc
-} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const authView = document.getElementById("auth-view");
 const appView = document.getElementById("app-view");
@@ -24,7 +20,7 @@ const pwInput = document.getElementById("login-password");
 const googleBtn = document.getElementById("google-btn");
 
 let currentUser = null;
-let currentTeams = [];   // 접속 사용자가 볼 수 있는 팀 리스트
+let currentTeams = [];   // 팀 권한(없어도 동작)
 let isAdminUser = false; // 관리자 여부
 
 function showBanner(msg, type="info") {
@@ -37,9 +33,7 @@ function showBanner(msg, type="info") {
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    const email = emailInput.value.trim();
-    const pw = pwInput.value;
-    await signInWithEmailAndPassword(auth, email, pw);
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), pwInput.value);
   } catch (err) {
     console.error(err);
     showBanner("로그인 실패: 이메일/비밀번호를 확인하세요.", "error");
@@ -64,42 +58,33 @@ signoutBtn.addEventListener("click", async () => {
   }
 });
 
-// 사용자 권한(팀) 로드
+// user_teams 없어도 앱은 동작해야 함
 async function loadUserTeams(uid) {
   try {
-    const ref = doc(db, "user_teams", uid);
-    const snap = await getDoc(ref);
+    const snap = await getDoc(doc(db, "user_teams", uid));
     if (snap.exists()) {
       const data = snap.data();
       currentTeams = Array.isArray(data.teams) ? data.teams : [];
-      if (!currentTeams.length) {
-        showBanner("팀 권한이 비어 있습니다. 관리자에게 문의하세요.", "error");
-      }
     } else {
       currentTeams = [];
-      showBanner("팀 권한(user_teams)이 설정되지 않았습니다. 관리자에게 문의하세요.", "error");
+      // 팀 미분류 상태로 동작 (DEV 규칙에서 전부 읽기 OK)
     }
   } catch (err) {
-    console.error(err);
+    console.warn("loadUserTeams error (무시):", err);
     currentTeams = [];
-    showBanner("권한 오류: 팀 권한 문서를 읽을 수 없습니다.", "error");
   }
 }
 
-// 관리자 여부 로드 (본인 admins/{uid} 읽기 허용 규칙 적용)
 async function loadIsAdmin(uid) {
   try {
-    const ref = doc(db, "admins", uid);
-    const snap = await getDoc(ref);
+    const snap = await getDoc(doc(db, "admins", uid));
     isAdminUser = snap.exists();
   } catch (err) {
-    // 문서가 없으면 exists()도 false인데, 권한 오류가 난다면 rules가 아직 적용 안 됐을 가능성
-    console.error(err);
+    console.warn("loadIsAdmin error (무시):", err);
     isAdminUser = false;
   }
 }
 
-// 라우팅에서 사용할 상태 제공
 export async function requireAuthAndTeams() {
   return { currentUser, currentTeams, isAdmin: isAdminUser };
 }
@@ -108,21 +93,16 @@ onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
     await Promise.all([loadUserTeams(user.uid), loadIsAdmin(user.uid)]);
-
-    // UI 전환
     authView.classList.add("hidden");
     appView.classList.remove("hidden");
     sidebar.classList.remove("hidden");
     document.getElementById("signed-in-profile").classList.remove("hidden");
     userEmailEl.textContent = user.email || "(이메일 없음)";
-
-    // 초기 라우트
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   } else {
     currentUser = null;
     currentTeams = [];
     isAdminUser = false;
-
     authView.classList.remove("hidden");
     appView.classList.add("hidden");
     sidebar.classList.add("hidden");
