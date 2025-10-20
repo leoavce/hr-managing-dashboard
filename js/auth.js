@@ -1,5 +1,5 @@
 // js/auth.js
-// Firebase Auth UI 로직 및 세션 제어 (+ admin 여부 판별 추가)
+// Firebase Auth UI 로직 및 세션 제어 (admins/{uid} 읽기 허용 규칙에 맞춰 동작)
 
 import { auth, googleProvider, db } from "./firebase.js";
 import {
@@ -86,13 +86,14 @@ async function loadUserTeams(uid) {
   }
 }
 
-// 관리자 여부 로드
+// 관리자 여부 로드 (본인 admins/{uid} 읽기 허용 규칙 적용)
 async function loadIsAdmin(uid) {
   try {
     const ref = doc(db, "admins", uid);
     const snap = await getDoc(ref);
     isAdminUser = snap.exists();
   } catch (err) {
+    // 문서가 없으면 exists()도 false인데, 권한 오류가 난다면 rules가 아직 적용 안 됐을 가능성
     console.error(err);
     isAdminUser = false;
   }
