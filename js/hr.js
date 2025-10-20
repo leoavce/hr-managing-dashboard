@@ -1,7 +1,4 @@
 // js/hr.js
-// 인력 관리: CRUD + CSV 업로드
-// 쓰기는 로그인 사용자 모두 허용 (Rules와 일치)
-
 import { db } from "./firebase.js";
 import { requireAuthAndTeams } from "./auth.js";
 import {
@@ -65,8 +62,6 @@ export async function renderHRPage(container){
     </div>
   `;
 
-  const { currentTeams, isAdmin } = await requireAuthAndTeams(); // isAdmin은 현재 미사용(확장 대비)
-
   const nameEl = document.getElementById("emp-name");
   const teamEl = document.getElementById("emp-team");
   const rankEl = document.getElementById("emp-rank");
@@ -88,15 +83,12 @@ export async function renderHRPage(container){
     if (!payload.name) { alert("이름은 필수입니다."); return; }
     if (!payload.team) { alert("팀은 필수입니다."); return; }
 
-    // 동일 팀 내 동일 이름 존재 시 업데이트 (팀 기준 조회만)
+    // 같은 팀·이름 있으면 업데이트, 없으면 추가
     const baseCol = collection(db, "employees");
     const q1 = query(baseCol, where("team","==", payload.team));
     const snaps = await getDocs(q1);
     let foundId = null;
-    snaps.forEach(d=>{
-      const e = d.data();
-      if (e.name===payload.name) foundId = d.id;
-    });
+    snaps.forEach(d=>{ const e=d.data(); if (e.name===payload.name) foundId=d.id; });
 
     if (foundId) {
       await updateDoc(doc(db, "employees", foundId), payload);
@@ -144,7 +136,6 @@ export async function renderHRPage(container){
         evalGrade: r.evalGrade || ""
       };
       if (!payload.team) continue;
-
       if (r.id) {
         await setDoc(doc(db, "employees", r.id), payload, { merge:true });
       } else {
@@ -157,24 +148,9 @@ export async function renderHRPage(container){
 
   async function renderList(){
     const listEl = document.getElementById("emp-list");
-    const baseCol = collection(db, "employees");
-    let rows = [];
-
-    // 읽기는 이전과 동일: 관리자 전체, 일반사용자는 팀 권한만
-    // (Rules 따라 비관리자는 자신의 팀만 보임)
-    const teams = currentTeams || [];
-    if (teams.length <= 10) {
-      const q1 = teams.length ? query(baseCol, where("team","in", teams)) : baseCol;
-      const snaps = teams.length ? await getDocs(q1) : await getDocs(baseCol);
-      snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
-    } else {
-      for (let i=0;i<teams.length;i+=10) {
-        const q1 = query(baseCol, where("team","in", teams.slice(i,i+10)));
-        const snaps = await getDocs(q1);
-        snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
-      }
-    }
-
+    const snaps = await getDocs(collection(db, "employees")); // 팀 권한 없이 전체 조회
+    const rows = [];
+    snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
     rows.sort((a,b)=> (a.team||"").localeCompare(b.team||"") || (a.name||"").localeCompare(b.name||""));
 
     listEl.innerHTML = `
