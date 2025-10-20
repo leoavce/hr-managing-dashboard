@@ -65,6 +65,17 @@
 }
 
 /* 공휴일 셀 배경 */
-.holiday-bg {
-  background: rgba(225, 29, 72, 0.08); /* rose-600 8% */
+:root { color-scheme: light dark; }
+.horizontal-calendar-scroll { overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+.calendar-header-sticky { position: sticky; top: 0; z-index: 10; background: inherit; }
+.calendar-left-sticky { position: sticky; left: 0; z-index: 20; background: inherit; }
+.calendar-cell { min-width: 140px; border-right: 1px solid rgba(0,0,0,0.06); }
+.member-col { min-width: 220px; max-width: 280px; }
+.role-col { min-width: 160px; max-width: 220px; }
+.task-chip {
+  display:inline-flex; align-items:center; padding:6px 10px; border-radius:8px;
+  font-size:12px; line-height:1.1; border:1px solid rgba(17,115,212,.15);
+  background: rgba(17,115,212,.08); margin:2px; user-select:none;
 }
+.holiday-label { color:#e11d48 !important; font-weight:700; }
+.holiday-bg { background: rgba(225, 29, 72, 0.10); } /* 좀 더 진하게 */
