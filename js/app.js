@@ -1,90 +1,56 @@
-// app.js
-// 앱 엔트리: Auth → 상태 로드 → 라우팅/렌더/이벤트 바인딩
+/**
+ * 엔트리 포인트
+ * - 인증 상태에 따라 라우팅/렌더링
+ * - 사이드바 이벤트 바인딩
+ * - 기본 라우트: 캘린더
+ */
+import './firebase-init.js';
+import { listenAuth, doLogout } from './auth.js';
+import { renderCalendarView } from './calendar.js';
+import { renderManMonthView } from './manmonth.js';
+import { renderHRView } from './hr.js';
+import { mountSidebarNavigation, renderInMain, Routes, setActiveRoute } from './ui.js';
 
-import { initAuth } from "./auth.js";
-import {
-  listEmployees, listAssignments, getPresets, listHolidays
-} from "./api.js";
-import { mountRouter, activateRoute } from "./router.js";
-import { renderCalendar } from "./calendar.js";
-import { mountManMonth } from "./manmonth.js";
-import { mountHR, renderAssignTable } from "./hr.js";
-import { importCsv } from "./csv.js";
+import '../css/styles.css'; // GitHub Pages에선 상대경로 주의: 루트 기준 배포 시 제거해도 무방(HTML link로 대체 가능)
 
-const state = {
-  employees: [],
-  assignments: [],
-  presets: { roles:[], tasks:[], members:[] },
-  holidays: [],
-  ui: {
-    baseDate: (function(){ const d=new Date(); d.setHours(9,0,0,0); return d.toISOString().slice(0,10); })(),
-    weekdays: []
-  },
-  reload: null // 뒤에서 주입
-};
+/* 사이드바 네비 연결 */
+mountSidebarNavigation((hash) => {
+  setActiveRoute(hash);
+  route(hash);
+});
 
-// 공통 로드
-async function loadAll() {
-  const [emp, asg, pre, hol] = await Promise.all([
-    listEmployees(), listAssignments(), getPresets(), listHolidays()
-  ]);
-  state.employees = emp;
-  state.assignments = asg;
-  state.presets = pre || { roles:[], tasks:[], members:[] };
-  state.holidays = hol || [];
+/* 우상단에 로그아웃 버튼 동적 주입(필요 시) */
+function injectLogout() {
+  const aside = document.querySelector('aside .p-6');
+  if (!aside || aside.querySelector('#logout-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'logout-btn';
+  btn.className = 'mt-3 text-xs text-gray-500 hover:underline';
+  btn.textContent = '로그아웃';
+  btn.addEventListener('click', doLogout);
+  aside.appendChild(btn);
 }
 
-function bindCommonUI() {
-  // 다크 모드
-  const btnDark = document.getElementById('btn-dark');
-  if (btnDark) btnDark.onclick = () => document.documentElement.classList.toggle('dark');
-
-  // CSV 업로드
-  let csvText = '';
-  const file = document.getElementById('csv-file');
-  const target = document.getElementById('csv-target');
-  const btn = document.getElementById('btn-import');
-  if (file) file.onchange = async (e) => {
-    const f = e.target.files[0];
-    if (!f) return; csvText = await f.text();
-    alert('CSV 업로드 준비 완료. "일괄 반영"을 눌러주세요.');
-  };
-  if (btn) btn.onclick = async () => {
-    if (!csvText) { alert('CSV 파일을 먼저 선택하세요.'); return; }
-    try {
-      await importCsv(target.value, csvText);
-      csvText = ''; file.value = '';
-      await state.reload();
-      alert('반영되었습니다.');
-      // 현재 화면에 맞춰 부분 리렌더
-      if (location.hash === '#/calendar') renderCalendar(state, state.reload);
-      if (location.hash === '#/manmonth') mountManMonth(state);
-      if (location.hash === '#/hr') { await mountHR(state); }
-    } catch { alert('CSV 반영 실패'); }
-  };
+function route(hash, profile) {
+  // 라우트별 뷰 교체
+  const h = hash || window.location.hash || Routes.CALENDAR;
+  let view;
+  if (h === Routes.MANMONTH) {
+    view = renderManMonthView(profile);
+  } else if (h === Routes.HR) {
+    view = renderHRView(profile);
+  } else {
+    view = renderCalendarView(profile);
+  }
+  renderInMain(view);
 }
 
-async function onRouteChange(hash) {
-  activateRoute(hash);
-  if (hash === '#/calendar') renderCalendar(state, state.reload);
-  else if (hash === '#/manmonth') mountManMonth(state);
-  else if (hash === '#/hr') await mountHR(state);
-}
+listenAuth(({ user, profile }) => {
+  if (!user) return; // 로그인 오버레이가 표시됨
+  injectLogout();
+  // 최초 진입: 기본 캘린더
+  route(window.location.hash || Routes.CALENDAR, profile);
+});
 
-async function main() {
-  // 인증 후 초기 로드
-  initAuth(async (user) => {
-    if (!user) {
-      // 로그인 전: 화면만 유지, 데이터 렌더 안 함
-      return;
-    }
-    state.reload = async () => { await loadAll(); }; // 주입
-    await state.reload();
-    bindCommonUI();
-    mountRouter(onRouteChange);
-    // 초기 진입 라우트 렌더
-    await onRouteChange(location.hash || '#/calendar');
-  });
-}
-
-main();
+// 해시 변경 대응
+window.addEventListener('hashchange', () => route(window.location.hash));
