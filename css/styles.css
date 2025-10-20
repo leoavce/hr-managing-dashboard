@@ -1,81 +1,58 @@
-/* 공통 */
-:root {
-  color-scheme: light dark;
-}
+:root { color-scheme: light dark; }
 
-/* 달력 컨테이너: 가로 스크롤 */
+/* 페이지 공용 배너 */
+#app-banner { position: sticky; top: 0; z-index: 50; }
+
+/* 가로 달력 */
 .horizontal-calendar-scroll {
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
 }
 
-/* 상단 날짜 헤더 sticky */
-.calendar-header-sticky {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: inherit;
-}
-
-/* 좌측 팀원 영역 sticky */
-.calendar-left-sticky {
-  position: sticky;
-  left: 0;
-  z-index: 20;
-  background: inherit;
-}
-
-/* 셀 기본 */
-.calendar-cell {
-  min-width: 140px; /* 가로 셀 폭 */
-  border-right: 1px solid rgba(0,0,0,0.06);
-}
-
-/* 팀원 열 폭 */
-.member-col {
-  min-width: 220px;
-  max-width: 280px;
-}
-
-/* 역할 열 폭 */
-.role-col {
-  min-width: 160px;
-  max-width: 220px;
-}
-
-/* 업무 카드 */
-.task-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.1;
-  border: 1px solid rgba(17, 115, 212, 0.15);
-  background: rgba(17, 115, 212, 0.08);
-  margin: 2px;
-  user-select: none;
-}
-
-/* 공휴일 상단 헤더 강조 */
-.holiday-label {
-  color: #e11d48 !important;
-  font-weight: 700;
-}
-
-/* 공휴일 셀 배경 */
-:root { color-scheme: light dark; }
-.horizontal-calendar-scroll { overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+/* 스티키 헤더/좌측 */
 .calendar-header-sticky { position: sticky; top: 0; z-index: 10; background: inherit; }
 .calendar-left-sticky { position: sticky; left: 0; z-index: 20; background: inherit; }
-.calendar-cell { min-width: 140px; border-right: 1px solid rgba(0,0,0,0.06); }
-.member-col { min-width: 220px; max-width: 280px; }
-.role-col { min-width: 160px; max-width: 220px; }
-.task-chip {
-  display:inline-flex; align-items:center; padding:6px 10px; border-radius:8px;
-  font-size:12px; line-height:1.1; border:1px solid rgba(17,115,212,.15);
-  background: rgba(17,115,212,.08); margin:2px; user-select:none;
+
+/* 달력 셀: 넓이를 줄여서 1~2달을 한 화면에서 많이 보이게 */
+.calendar-cell {
+  min-width: 110px; /* 이전 140 → 110 */
+  border-right: 1px solid rgba(0,0,0,0.06);
+  box-sizing: border-box;
 }
+
+/* 팀원/역할 열 폭 */
+.member-col { min-width: 240px; max-width: 300px; }
+.role-col { min-width: 160px; max-width: 220px; }
+
+/* 업무 배지 */
+.task-chip {
+  display:inline-flex; align-items:center; padding:4px 8px;
+  border-radius:8px; font-size:12px; line-height:1.1;
+  border:1px solid rgba(17,115,212,.15); background: rgba(17,115,212,.08);
+  margin:2px; user-select:none;
+}
+
+/* 공휴일 강조 */
 .holiday-label { color:#e11d48 !important; font-weight:700; }
-.holiday-bg { background: rgba(225, 29, 72, 0.10); } /* 좀 더 진하게 */
+.holiday-bg { background: rgba(225, 29, 72, 0.10); }
+
+/* 편집/행동 버튼 */
+.row-actions { display:flex; gap:6px; }
+.row-button {
+  font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid rgba(0,0,0,.08);
+}
+.row-button:hover { background: rgba(0,0,0,.04); }
+
+/* 표 스크롤 */
+.table-scroll { overflow:auto; }
+
+/* 필터/정렬 바 */
+.toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
+
+/* MM 표 */
+.mm-badge {
+  display:inline-block; padding:2px 6px; border-radius:6px;
+  background: rgba(17,115,212,.08); border:1px solid rgba(17,115,212,.15);
+  font-size:12px;
+}
