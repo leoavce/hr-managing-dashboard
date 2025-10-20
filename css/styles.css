@@ -8,59 +8,62 @@
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
+  scroll-behavior: auto; /* 즉시 반영 (무한 스크롤 보정시 유리) */
 }
 
 /* 스티키 헤더/좌측 */
 .calendar-header-sticky { position: sticky; top: 0; z-index: 10; background: inherit; }
 .calendar-left-sticky { position: sticky; left: 0; z-index: 20; background: inherit; }
 
-/* 달력 셀: 폭을 크게 줄여 두 달이 한 화면(대부분)에서 보이도록 */
+/* 달력 셀: 폭을 작게(촘촘하게) – 1~2달 한 화면 */
 .calendar-cell {
-  width: 32px;               /* 고정폭: 연속 막대 계산에 사용 */
+  width: 32px;               /* 고정폭: 스팬 계산에 사용 */
   min-width: 32px;
   max-width: 32px;
-  height: 44px;              /* 높이 살짝 */
+  height: 44px;
   border-right: 1px solid rgba(0,0,0,0.06);
   box-sizing: border-box;
 }
 
-/* 팀원 열 폭 (역할 칼럼 삭제, 팀원만 고정) */
+/* 팀원 열 폭 (역할 칼럼 제거 후 고정 좌측) */
 .member-col { min-width: 260px; max-width: 320px; }
 
 /* 공휴일 강조 */
 .holiday-label { color:#e11d48 !important; font-weight:700; }
 .holiday-bg { background: rgba(225, 29, 72, 0.12); }
 
-/* 행: 스팬막대를 올릴 수 있도록 relative 컨테이너 */
-.row-track {
-  position: relative;
-  display: flex;
-}
+/* 행 컨테이너(스팬 absolute 배치용) */
+.row-track { position: relative; display: flex; }
 
-/* 연속 업무 스팬 막대 */
+/* 연속 업무 스팬 막대 + 라벨(막대 안 텍스트) */
 .task-span {
   position: absolute;
-  height: 12px;
-  top: 16px; /* 셀 내 수직 정렬 */
+  height: 16px;            /* 조금 더 높여서 가독성 ↑ */
+  top: 14px;
   border-radius: 9999px;
-  background: rgba(17,115,212,.65);
+  background: rgba(17,115,212,.85);
   outline: 1px solid rgba(17,115,212,.35);
   cursor: pointer;
+
+  /* 라벨 중앙 정렬 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .task-span:hover { filter: brightness(0.95); }
-
-/* 업무 라벨은 툴팁(title)로 기본 제공. 필요 시 아래 클래스로 숫자/짧은 텍스트 표시 가능 */
-.task-span-label {
-  position: absolute; left: 4px; top: -18px;
-  font-size: 10px; color: #374151; white-space: nowrap;
-  background: rgba(255,255,255,.85); padding: 0 4px; border-radius: 4px;
-  border: 1px solid rgba(0,0,0,.08);
-}
 
 /* 표 스크롤 */
 .table-scroll { overflow:auto; }
 
-/* 필터/정렬 바 */
+/* 툴바 */
 .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
 
 /* MM 표 */
