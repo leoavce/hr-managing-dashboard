@@ -14,35 +14,48 @@
 .calendar-header-sticky { position: sticky; top: 0; z-index: 10; background: inherit; }
 .calendar-left-sticky { position: sticky; left: 0; z-index: 20; background: inherit; }
 
-/* 달력 셀: 넓이를 줄여서 1~2달을 한 화면에서 많이 보이게 */
+/* 달력 셀: 폭을 크게 줄여 두 달이 한 화면(대부분)에서 보이도록 */
 .calendar-cell {
-  min-width: 110px; /* 이전 140 → 110 */
+  width: 32px;               /* 고정폭: 연속 막대 계산에 사용 */
+  min-width: 32px;
+  max-width: 32px;
+  height: 44px;              /* 높이 살짝 */
   border-right: 1px solid rgba(0,0,0,0.06);
   box-sizing: border-box;
 }
 
-/* 팀원/역할 열 폭 */
-.member-col { min-width: 240px; max-width: 300px; }
-.role-col { min-width: 160px; max-width: 220px; }
-
-/* 업무 배지 */
-.task-chip {
-  display:inline-flex; align-items:center; padding:4px 8px;
-  border-radius:8px; font-size:12px; line-height:1.1;
-  border:1px solid rgba(17,115,212,.15); background: rgba(17,115,212,.08);
-  margin:2px; user-select:none;
-}
+/* 팀원 열 폭 (역할 칼럼 삭제, 팀원만 고정) */
+.member-col { min-width: 260px; max-width: 320px; }
 
 /* 공휴일 강조 */
 .holiday-label { color:#e11d48 !important; font-weight:700; }
-.holiday-bg { background: rgba(225, 29, 72, 0.10); }
+.holiday-bg { background: rgba(225, 29, 72, 0.12); }
 
-/* 편집/행동 버튼 */
-.row-actions { display:flex; gap:6px; }
-.row-button {
-  font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid rgba(0,0,0,.08);
+/* 행: 스팬막대를 올릴 수 있도록 relative 컨테이너 */
+.row-track {
+  position: relative;
+  display: flex;
 }
-.row-button:hover { background: rgba(0,0,0,.04); }
+
+/* 연속 업무 스팬 막대 */
+.task-span {
+  position: absolute;
+  height: 12px;
+  top: 16px; /* 셀 내 수직 정렬 */
+  border-radius: 9999px;
+  background: rgba(17,115,212,.65);
+  outline: 1px solid rgba(17,115,212,.35);
+  cursor: pointer;
+}
+.task-span:hover { filter: brightness(0.95); }
+
+/* 업무 라벨은 툴팁(title)로 기본 제공. 필요 시 아래 클래스로 숫자/짧은 텍스트 표시 가능 */
+.task-span-label {
+  position: absolute; left: 4px; top: -18px;
+  font-size: 10px; color: #374151; white-space: nowrap;
+  background: rgba(255,255,255,.85); padding: 0 4px; border-radius: 4px;
+  border: 1px solid rgba(0,0,0,.08);
+}
 
 /* 표 스크롤 */
 .table-scroll { overflow:auto; }
