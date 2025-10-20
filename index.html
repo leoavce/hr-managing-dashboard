@@ -5,11 +5,10 @@
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
   <title>인력 투입 현황 대시보드</title>
 
-  <!-- Tailwind (CDN) -->
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
-
   <script id="tailwind-config">
     tailwind.config = {
       darkMode: "class",
@@ -19,7 +18,6 @@
             "primary": "#1173d4",
             "background-light": "#f6f7f8",
             "background-dark": "#101922",
-            "holiday-red": "#e11d48"
           },
           fontFamily: { "display": ["Inter"] },
           borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
@@ -28,103 +26,72 @@
     }
   </script>
 
-  <link rel="stylesheet" href="./css/styles.css">
+  <link rel="stylesheet" href="css/styles.css"/>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display">
-  <!-- 최상단 알림/세션 영역 -->
   <div id="app-banner" class="hidden"></div>
 
-  <div class="relative flex min-h-screen w-full">
+  <!-- 로그인 뷰 -->
+  <section id="auth-view" class="min-h-screen grid place-items-center p-6">
+    <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow p-6 space-y-4">
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">로그인</h1>
+      <form id="login-form" class="space-y-3">
+        <div>
+          <label class="text-sm text-gray-600 dark:text-gray-300">이메일</label>
+          <input id="login-email" type="email" class="mt-1 w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"/>
+        </div>
+        <div>
+          <label class="text-sm text-gray-600 dark:text-gray-300">비밀번호</label>
+          <input id="login-password" type="password" class="mt-1 w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"/>
+        </div>
+        <button class="w-full rounded-lg bg-primary text-white py-2">이메일 로그인</button>
+      </form>
+      <button id="google-btn" class="w-full rounded-lg border py-2 dark:border-gray-700">Google 로그인</button>
+    </div>
+  </section>
+
+  <!-- 앱 뷰 -->
+  <div id="app-view" class="hidden relative flex min-h-screen w-full">
     <!-- Sidebar -->
-    <aside id="sidebar" class="w-72 flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col hidden">
+    <aside id="sidebar" class="hidden w-64 flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
       <div class="p-6">
-        <h1 class="text-xl font-bold text-gray-800 dark:text-white">HR Dashboard</h1>
-        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">인력 투입 현황 / Man-Month / 인력관리</p>
+        <h1 class="text-xl font-bold text-gray-800 dark:text-white">HR 대시보드</h1>
       </div>
       <nav class="flex-1 px-4 py-2 space-y-1">
-        <a data-route="calendar" class="route-link flex items-center gap-3 px-4 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer">
+        <a href="#calendar" class="nav-link flex items-center gap-3 px-4 py-2 rounded-lg bg-primary/10 text-primary">
           <span class="material-symbols-outlined">calendar_view_week</span>
-          <span class="font-medium">달력 (투입 현황)</span>
+          <span class="font-medium">투입 달력</span>
         </a>
-        <a data-route="manmonth" class="route-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
+        <a href="#mm" class="nav-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">
           <span class="material-symbols-outlined">calculate</span>
           <span class="font-medium">Man-Month 계산</span>
         </a>
-        <a data-route="hr" class="route-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
+        <a href="#hr" class="nav-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">
           <span class="material-symbols-outlined">groups</span>
           <span class="font-medium">인력 관리</span>
         </a>
       </nav>
 
-      <div class="p-4 border-t border-gray-200 dark:border-gray-800 space-y-2">
+      <div class="border-t border-gray-200 dark:border-gray-800 p-4">
         <div id="signed-in-profile" class="hidden">
-          <p class="text-xs text-gray-500 dark:text-gray-400">로그인 계정</p>
-          <p id="user-email" class="text-sm font-semibold text-gray-800 dark:text-white"></p>
+          <div class="text-sm text-gray-600 dark:text-gray-300">로그인: <span id="user-email" class="font-medium"></span></div>
+          <button id="signout-btn" class="mt-2 w-full rounded-lg border px-3 py-1.5 dark:border-gray-700">로그아웃</button>
         </div>
-        <button id="signout-btn" class="w-full inline-flex justify-center items-center gap-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 px-4 py-2 hover:bg-gray-200 dark:hover:bg-gray-700">
-          <span class="material-symbols-outlined">logout</span> 로그아웃
-        </button>
       </div>
     </aside>
 
-    <!-- Main Content -->
-    <main class="flex-1 p-6 md:p-8">
-      <div class="max-w-7xl mx-auto">
-        <!-- 로그인 뷰 -->
-        <section id="auth-view" class="max-w-md mx-auto bg-white dark:bg-gray-900 p-6 rounded-xl shadow-sm">
-          <h2 class="text-2xl font-black text-gray-900 dark:text-white mb-6 tracking-[-0.02em]">로그인</h2>
-          <form id="login-form" class="space-y-3">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">이메일</label>
-              <input id="login-email" type="email" required class="mt-1 w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white" placeholder="name@company.com"/>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">비밀번호</label>
-              <input id="login-password" type="password" required class="mt-1 w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white" placeholder="••••••••"/>
-            </div>
-            <button class="w-full inline-flex justify-center items-center gap-2 rounded-lg bg-primary text-white px-4 py-2 hover:opacity-95" type="submit">
-              <span class="material-symbols-outlined">login</span> 로그인
-            </button>
-          </form>
-
-          <div class="my-4 flex items-center gap-2">
-            <div class="h-px bg-gray-200 dark:bg-gray-800 flex-1"></div>
-            <span class="text-xs text-gray-500">또는</span>
-            <div class="h-px bg-gray-200 dark:bg-gray-800 flex-1"></div>
-          </div>
-
-          <button id="google-btn" class="w-full inline-flex justify-center items-center gap-2 rounded-lg bg-white border border-gray-200 text-gray-800 px-4 py-2 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100">
-            <span class="material-symbols-outlined">account_circle</span> Google로 로그인
-          </button>
-
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-4">
-            * 초기 사용 시 관리자가 Firebase Console에서 계정 권한(팀 배정) 설정 필요
-          </p>
-        </section>
-
-        <!-- 앱 컨텐츠 라우터 -->
-        <section id="app-view" class="hidden">
-          <div class="flex flex-wrap justify-between gap-3 mb-6">
-            <p id="page-title" class="text-gray-900 dark:text-white text-3xl md:text-4xl font-black leading-tight tracking-[-0.033em]">달력</p>
-          </div>
-          <div id="page-container"></div>
-        </section>
+    <!-- Main -->
+    <main class="flex-1 p-6">
+      <div class="max-w-[1600px] mx-auto">
+        <div class="flex flex-wrap justify-between gap-3 mb-5">
+          <p id="page-title" class="text-gray-800 dark:text-white text-3xl font-black leading-tight tracking-[-0.033em]">투입 달력</p>
+        </div>
+        <div id="page-container"></div>
       </div>
     </main>
   </div>
 
-  <!-- Firebase SDK (module) -->
-  <script type="module">
-    // gstatic에서 모듈 가져오기
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-analytics.js";
-    // 전역에서 사용하기 위해 window에 임시 보관 (firebase.js에서 재초기화하지 않도록)
-    window.__firebaseModules = { initializeApp, getAnalytics };
-  </script>
-
-  <!-- 애플리케이션 스크립트 -->
-  <script type="module" src="./js/firebase.js"></script>
-  <script type="module" src="./js/auth.js"></script>
-  <script type="module" src="./js/app.js"></script>
+  <!-- 앱 스크립트 -->
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
