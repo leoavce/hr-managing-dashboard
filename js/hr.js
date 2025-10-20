@@ -1,6 +1,11 @@
 // js/hr.js
+// 요구 반영:
+// - 전체 조회/추가 가능 (DEV 규칙 기준)
+// - 정렬 기준 선택 (팀/이름/직급/상태/평가)
+// - 필터 (팀, 상태, 평가)
+// - CSV 업로드/템플릿
+
 import { db } from "./firebase.js";
-import { requireAuthAndTeams } from "./auth.js";
 import {
   collection, getDocs, addDoc, doc, setDoc, updateDoc, deleteDoc, query, where
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
@@ -8,57 +13,86 @@ import {
 export async function renderHRPage(container){
   container.innerHTML = `
     <div class="bg-white dark:bg-gray-900 p-4 md:p-6 rounded-xl shadow-sm">
-      <div class="flex flex-wrap items-end gap-3 mb-4">
-        <div class="w-48">
+      <div class="toolbar mb-4">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">이름</label>
-          <input id="emp-name" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          <input id="emp-name" class="w-44 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
         </div>
-        <div class="w-40">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">팀</label>
-          <input id="emp-team" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          <input id="emp-team" class="w-36 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
         </div>
-        <div class="w-32">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">직급</label>
-          <input id="emp-rank" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          <input id="emp-rank" class="w-32 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
         </div>
-        <div class="w-36">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">상태</label>
-          <select id="emp-status" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+          <select id="emp-status" class="w-32 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
             <option value="active">재직</option>
             <option value="onleave">휴직</option>
             <option value="left">퇴사</option>
           </select>
         </div>
-        <div class="w-40">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">입사일</label>
-          <input id="emp-join" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          <input id="emp-join" type="date" class="w-40 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
         </div>
-        <div class="w-40">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">퇴사일</label>
-          <input id="emp-leave" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          <input id="emp-leave" type="date" class="w-40 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
         </div>
-        <div class="w-28">
+        <div>
           <label class="block text-sm text-gray-600 dark:text-gray-300">평가</label>
-          <select id="emp-eval" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+          <select id="emp-eval" class="w-28 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
             <option value="">-</option>
             <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option>
           </select>
         </div>
-        <button id="emp-add" class="rounded-lg bg-primary text-white px-4 py-2">추가/업데이트</button>
+        <button id="emp-add" class="rounded-lg bg-primary text-white px-4 py-2 h-10">추가/업데이트</button>
       </div>
 
-      <div class="flex items-center justify-between gap-2 mb-3">
-        <div class="text-sm text-gray-600 dark:text-gray-300">
-          CSV 업로드(Excel에서 내보내기): id,name,team,rank,status,joinDate,leaveDate,evalGrade
+      <div class="toolbar mb-3">
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300">정렬</label>
+          <select id="sort-key" class="w-36 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+            <option value="team">팀</option>
+            <option value="name">이름</option>
+            <option value="rank">직급</option>
+            <option value="status">상태</option>
+            <option value="evalGrade">평가</option>
+          </select>
         </div>
-        <div class="flex items-center gap-2">
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300">팀 필터</label>
+          <input id="filter-team" class="w-36 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300">상태 필터</label>
+          <select id="filter-status" class="w-32 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+            <option value="">전체</option>
+            <option value="active">재직</option>
+            <option value="onleave">휴직</option>
+            <option value="left">퇴사</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-600 dark:text-gray-300">평가 필터</label>
+          <select id="filter-eval" class="w-28 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+            <option value="">전체</option>
+            <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option>
+          </select>
+        </div>
+        <button id="apply-filter" class="rounded-lg border px-3 py-2 h-10 dark:border-gray-700">적용</button>
+
+        <div class="ml-auto flex items-center gap-2">
           <input id="csv-file" type="file" accept=".csv" class="text-sm"/>
-          <button id="csv-upload" class="rounded-lg border px-3 py-1.5">업로드</button>
-          <button id="template-btn" class="rounded-lg border px-3 py-1.5">템플릿 다운로드</button>
+          <button id="csv-upload" class="rounded-lg border px-3 py-2 dark:border-gray-700">CSV 업로드</button>
+          <button id="template-btn" class="rounded-lg border px-3 py-2 dark:border-gray-700">템플릿</button>
         </div>
       </div>
 
-      <div id="emp-list" class="overflow-auto border rounded-lg"></div>
+      <div id="emp-list" class="table-scroll border rounded-lg"></div>
     </div>
   `;
 
@@ -69,6 +103,11 @@ export async function renderHRPage(container){
   const joinEl = document.getElementById("emp-join");
   const leaveEl = document.getElementById("emp-leave");
   const evalEl = document.getElementById("emp-eval");
+
+  const sortKeyEl = document.getElementById("sort-key");
+  const filterTeamEl = document.getElementById("filter-team");
+  const filterStatusEl = document.getElementById("filter-status");
+  const filterEvalEl = document.getElementById("filter-eval");
 
   document.getElementById("emp-add").onclick = async ()=>{
     const payload = {
@@ -83,7 +122,7 @@ export async function renderHRPage(container){
     if (!payload.name) { alert("이름은 필수입니다."); return; }
     if (!payload.team) { alert("팀은 필수입니다."); return; }
 
-    // 같은 팀·이름 있으면 업데이트, 없으면 추가
+    // 동일 팀+이름 업데이트 / 없으면 추가
     const baseCol = collection(db, "employees");
     const q1 = query(baseCol, where("team","==", payload.team));
     const snaps = await getDocs(q1);
@@ -136,6 +175,7 @@ export async function renderHRPage(container){
         evalGrade: r.evalGrade || ""
       };
       if (!payload.team) continue;
+
       if (r.id) {
         await setDoc(doc(db, "employees", r.id), payload, { merge:true });
       } else {
@@ -146,12 +186,26 @@ export async function renderHRPage(container){
     await renderList();
   };
 
+  document.getElementById("apply-filter").onclick = renderList;
+  sortKeyEl.onchange = renderList;
+
   async function renderList(){
     const listEl = document.getElementById("emp-list");
-    const snaps = await getDocs(collection(db, "employees")); // 팀 권한 없이 전체 조회
-    const rows = [];
+    const snaps = await getDocs(collection(db, "employees"));
+    let rows = [];
     snaps.forEach(d=> rows.push({ id:d.id, ...d.data() }));
-    rows.sort((a,b)=> (a.team||"").localeCompare(b.team||"") || (a.name||"").localeCompare(b.name||""));
+
+    // 필터
+    const ft = filterTeamEl.value.trim();
+    const fs = filterStatusEl.value;
+    const fe = filterEvalEl.value;
+    if (ft) rows = rows.filter(r=> (r.team||"").includes(ft));
+    if (fs) rows = rows.filter(r=> (r.status||"") === fs);
+    if (fe) rows = rows.filter(r=> (r.evalGrade||"") === fe);
+
+    // 정렬
+    const key = sortKeyEl.value || "team";
+    rows.sort((a,b)=> (a[key]||"").localeCompare(b[key]||"") || (a.name||"").localeCompare(b.name||""));
 
     listEl.innerHTML = `
       <table class="min-w-full text-sm">
