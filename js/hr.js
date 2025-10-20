@@ -1,150 +1,204 @@
-/**
- * 인력 관리: 신규 입사/퇴사, 직급/평가(A~E) 관리
- * Firestore:
- *  - /teams/{teamId}/members/{uid}: displayName,email,position
- *  - /teams/{teamId}/hrProfiles/{uid}: rank(A~E), joined, left
- */
-import { db } from './firebase-init.js';
+// js/hr.js
+// 인력 관리: CRUD + CSV 업로드
+
+import { db } from "./firebase.js";
 import {
-  collection, getDocs, setDoc, doc, deleteDoc
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { makeCSVInput, parseCSV } from './calendar.js';
+  collection, getDocs, addDoc, doc, setDoc, updateDoc, deleteDoc
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-async function loadMembers(teamId) {
-  const snaps = await getDocs(collection(db, 'teams', teamId, 'members'));
-  const arr = [];
-  snaps.forEach(d => arr.push({ id: d.id, ...d.data() }));
-  arr.sort((a,b) => (a.displayName||'').localeCompare(b.displayName||'', 'ko'));
-  return arr;
-}
-async function loadProfiles(teamId) {
-  const snaps = await getDocs(collection(db, 'teams', teamId, 'hrProfiles'));
-  const map = {};
-  snaps.forEach(d => map[d.id] = d.data());
-  return map;
-}
+export async function renderHRPage(container){
+  container.innerHTML = `
+    <div class="bg-white dark:bg-gray-900 p-4 md:p-6 rounded-xl shadow-sm">
+      <div class="flex flex-wrap items-end gap-3 mb-4">
+        <div class="w-48">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">이름</label>
+          <input id="emp-name" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+        </div>
+        <div class="w-40">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">팀</label>
+          <input id="emp-team" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+        </div>
+        <div class="w-32">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">직급</label>
+          <input id="emp-rank" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+        </div>
+        <div class="w-36">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">상태</label>
+          <select id="emp-status" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+            <option value="active">재직</option>
+            <option value="onleave">휴직</option>
+            <option value="left">퇴사</option>
+          </select>
+        </div>
+        <div class="w-40">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">입사일</label>
+          <input id="emp-join" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+        </div>
+        <div class="w-40">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">퇴사일</label>
+          <input id="emp-leave" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+        </div>
+        <div class="w-28">
+          <label class="block text-sm text-gray-600 dark:text-gray-300">평가</label>
+          <select id="emp-eval" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm">
+            <option value="">-</option>
+            <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option>
+          </select>
+        </div>
+        <button id="emp-add" class="rounded-lg bg-primary text-white px-4 py-2">추가/업데이트</button>
+      </div>
 
-export function renderHRView(profile) {
-  const root = document.createElement('div');
-  root.className = 'bg-white dark:bg-gray-900 p-6 rounded-xl shadow-sm';
-  root.innerHTML = `
-    <p class="text-xl font-bold mb-4">인력 관리</p>
-    <div class="flex flex-wrap items-end gap-3 mb-4">
-      <button id="add-member" class="bg-[#1173d4] text-white rounded px-3 py-2">신규 입사</button>
-      <button id="delete-member" class="bg-red-500 text-white rounded px-3 py-2">퇴사(삭제)</button>
-      <div class="text-sm text-gray-500">* 간단 CRUD. 상세 필드는 CSV로 일괄 반영 가능</div>
+      <div class="flex items-center justify-between gap-2 mb-3">
+        <div class="text-sm text-gray-600 dark:text-gray-300">
+          CSV 업로드(Excel에서 내보내기): id,name,team,rank,status,joinDate,leaveDate,evalGrade
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="csv-file" type="file" accept=".csv" class="text-sm"/>
+          <button id="csv-upload" class="rounded-lg border px-3 py-1.5">업로드</button>
+          <button id="template-btn" class="rounded-lg border px-3 py-1.5">템플릿 다운로드</button>
+        </div>
+      </div>
+
+      <div id="emp-list" class="overflow-auto border rounded-lg"></div>
     </div>
-    <div id="csv-host" class="mb-4"></div>
-    <div id="hr-list" class="overflow-x-auto"></div>
   `;
 
-  const csvHost = root.querySelector('#csv-host');
-  csvHost.appendChild(
-    makeCSVInput('CSV 업로드( members / profiles )', async (text) => {
-      const rows = parseCSV(text);
-      for (const r of rows) {
-        const tp = (r.type||'').toLowerCase();
-        if (tp === 'members') {
-          const uid = r.uid || crypto.randomUUID();
-          await setDoc(doc(db, 'teams', profile.teamId, 'members', uid), {
-            displayName: r.displayName, email: r.email, position: r.position
-          }, { merge: true });
-        } else if (tp === 'profiles') {
-          await setDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', r.uid), {
-            rank: r.rank, joined: r.joined || null, left: r.left || null
-          }, { merge: true });
-        }
-      }
-      alert('CSV 반영 완료');
-      renderList();
-    })
-  );
+  const nameEl = document.getElementById("emp-name");
+  const teamEl = document.getElementById("emp-team");
+  const rankEl = document.getElementById("emp-rank");
+  const statusEl = document.getElementById("emp-status");
+  const joinEl = document.getElementById("emp-join");
+  const leaveEl = document.getElementById("emp-leave");
+  const evalEl = document.getElementById("emp-eval");
 
-  root.querySelector('#add-member').addEventListener('click', async () => {
-    const name = prompt('이름?');
-    if (!name) return;
-    const email = prompt('이메일?(선택)') || '';
-    const position = prompt('직급/직책?(선택)') || '';
-    const uid = crypto.randomUUID();
-    await setDoc(doc(db, 'teams', profile.teamId, 'members', uid), {
-      displayName: name, email, position
+  document.getElementById("emp-add").onclick = async ()=>{
+    // id는 이름+팀 기반 생성 or 수동 ID? -> 여기서는 Firestore autoId 사용
+    const payload = {
+      name: nameEl.value.trim(),
+      team: teamEl.value.trim(),
+      rank: rankEl.value.trim(),
+      status: statusEl.value,
+      joinDate: joinEl.value || "",
+      leaveDate: leaveEl.value || "",
+      evalGrade: evalEl.value || ""
+    };
+    if (!payload.name) { alert("이름은 필수입니다."); return; }
+
+    // 동일 이름/팀 있으면 업데이트, 없으면 신규
+    const snap = await getDocs(collection(db, "employees"));
+    let foundId = null;
+    snap.forEach(d=>{
+      const e = d.data();
+      if (e.name===payload.name && e.team===payload.team) foundId = d.id;
     });
-    await setDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', uid), {
-      rank: 'C', joined: new Date().toISOString().slice(0,10)
-    }, { merge: true });
-    renderList();
-  });
+    if (foundId) {
+      await updateDoc(doc(db, "employees", foundId), payload);
+      alert("업데이트 완료");
+    } else {
+      await addDoc(collection(db, "employees"), payload);
+      alert("추가 완료");
+    }
+    await renderList();
+  };
 
-  root.querySelector('#delete-member').addEventListener('click', async () => {
-    const uid = prompt('퇴사 처리할 UID? (members 문서 ID)');
-    if (!uid) return;
-    await deleteDoc(doc(db, 'teams', profile.teamId, 'members', uid));
-    await deleteDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', uid));
-    alert('삭제 완료');
-    renderList();
-  });
+  document.getElementById("template-btn").onclick = ()=>{
+    const csv = "id,name,team,rank,status,joinDate,leaveDate,evalGrade\n";
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "employees_template.csv";
+    a.click();
+  };
 
-  async function renderList() {
-    const listHost = root.querySelector('#hr-list');
-    const members = await loadMembers(profile.teamId);
-    const profiles = await loadProfiles(profile.teamId);
+  // 간단 CSV 파서 (따옴표/콤마 기본 처리, 엣지케이스 단순화)
+  function parseCSV(text){
+    const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n").filter(Boolean);
+    const headers = lines[0].split(",").map(s=>s.trim());
+    return lines.slice(1).map(line=>{
+      // 기본 콤마 split. 큰따옴표 포함 케이스는 더 정교한 파서 필요(사내 포맷은 단순 가정)
+      const cols = line.split(",").map(s=>s.trim());
+      const obj = {};
+      headers.forEach((h, i)=> obj[h] = (cols[i]||""));
+      return obj;
+    });
+  }
 
-    const table = document.createElement('table');
-    table.className = 'min-w-[720px] w-full text-sm';
-    table.innerHTML = `
-      <thead>
-        <tr class="text-left border-b">
-          <th class="py-2">UID</th>
-          <th class="py-2">이름</th>
-          <th class="py-2">이메일</th>
-          <th class="py-2">직급/직책</th>
-          <th class="py-2">평가(A~E)</th>
-          <th class="py-2">입사일</th>
-          <th class="py-2">퇴사일</th>
-          <th class="py-2">저장</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${members.map(m => {
-          const p = profiles[m.id] || {};
-          return `
-          <tr class="border-b" data-uid="${m.id}">
-            <td class="py-2 text-gray-500">${m.id}</td>
-            <td class="py-2">${m.displayName ?? ''}</td>
-            <td class="py-2">${m.email ?? ''}</td>
-            <td class="py-2"><input class="border rounded px-2 py-1" data-field="position" value="${m.position ?? ''}"></td>
-            <td class="py-2">
-              <select class="border rounded px-2 py-1" data-field="rank">
-                ${['A','B','C','D','E'].map(r => `<option value="${r}" ${p.rank===r?'selected':''}>${r}</option>`).join('')}
-              </select>
-            </td>
-            <td class="py-2"><input type="date" class="border rounded px-2 py-1" data-field="joined" value="${p.joined ?? ''}"></td>
-            <td class="py-2"><input type="date" class="border rounded px-2 py-1" data-field="left" value="${p.left ?? ''}"></td>
-            <td class="py-2"><button class="bg-[#1173d4] text-white rounded px-2 py-1 save-row">저장</button></td>
-          </tr>`;
-        }).join('')}
-      </tbody>
+  document.getElementById("csv-upload").onclick = async ()=>{
+    const f = document.getElementById("csv-file").files[0];
+    if (!f) { alert("CSV 파일을 선택하세요."); return; }
+    const text = await f.text();
+    const rows = parseCSV(text);
+    // 업서트
+    for (const r of rows) {
+      const payload = {
+        name: r.name || "",
+        team: r.team || "",
+        rank: r.rank || "",
+        status: r.status || "active",
+        joinDate: r.joinDate || "",
+        leaveDate: r.leaveDate || "",
+        evalGrade: r.evalGrade || ""
+      };
+      if (r.id) {
+        await setDoc(doc(db, "employees", r.id), payload, { merge:true });
+      } else {
+        await addDoc(collection(db, "employees"), payload);
+      }
+    }
+    alert(`업로드 완료: ${rows.length}건`);
+    await renderList();
+  };
+
+  async function renderList(){
+    const listEl = document.getElementById("emp-list");
+    const snap = await getDocs(collection(db, "employees"));
+    const rows = [];
+    snap.forEach(d=> rows.push({ id:d.id, ...d.data() }));
+    rows.sort((a,b)=> (a.team||"").localeCompare(b.team||"") || (a.name||"").localeCompare(b.name||""));
+
+    listEl.innerHTML = `
+      <table class="min-w-full text-sm">
+        <thead class="text-left bg-gray-50 dark:bg-gray-800">
+          <tr>
+            <th class="py-2 px-3">ID</th>
+            <th class="py-2 px-3">이름</th>
+            <th class="py-2 px-3">팀</th>
+            <th class="py-2 px-3">직급</th>
+            <th class="py-2 px-3">상태</th>
+            <th class="py-2 px-3">입사일</th>
+            <th class="py-2 px-3">퇴사일</th>
+            <th class="py-2 px-3">평가</th>
+            <th class="py-2 px-3">작업</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r=>`
+            <tr class="border-b border-gray-100 dark:border-gray-800">
+              <td class="py-2 px-3">${r.id}</td>
+              <td class="py-2 px-3">${r.name||""}</td>
+              <td class="py-2 px-3">${r.team||""}</td>
+              <td class="py-2 px-3">${r.rank||""}</td>
+              <td class="py-2 px-3">${r.status||""}</td>
+              <td class="py-2 px-3">${r.joinDate||""}</td>
+              <td class="py-2 px-3">${r.leaveDate||""}</td>
+              <td class="py-2 px-3">${r.evalGrade||""}</td>
+              <td class="py-2 px-3">
+                <button data-id="${r.id}" class="emp-del text-rose-600 hover:underline">삭제</button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
     `;
-    listHost.innerHTML = '';
-    listHost.appendChild(table);
 
-    table.querySelectorAll('.save-row').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const tr = btn.closest('tr');
-        const uid = tr.getAttribute('data-uid');
-        const pos = /** @type {HTMLInputElement} */(tr.querySelector('[data-field="position"]')).value;
-        const rank = /** @type {HTMLSelectElement} */(tr.querySelector('[data-field="rank"]')).value;
-        const joined = /** @type {HTMLInputElement} */(tr.querySelector('[data-field="joined"]')).value;
-        const left = /** @type {HTMLInputElement} */(tr.querySelector('[data-field="left"]')).value;
-
-        await setDoc(doc(db, 'teams', profile.teamId, 'members', uid), { position: pos }, { merge: true });
-        await setDoc(doc(db, 'teams', profile.teamId, 'hrProfiles', uid), { rank, joined: joined || null, left: left || null }, { merge: true });
-
-        tr.style.outline = '2px solid #93c5fd';
-        setTimeout(() => (tr.style.outline = ''), 700);
+    listEl.querySelectorAll(".emp-del").forEach(btn=>{
+      btn.addEventListener("click", async ()=>{
+        if (!confirm("삭제하시겠습니까?")) return;
+        await deleteDoc(doc(db, "employees", btn.dataset.id));
+        await renderList();
       });
     });
   }
 
-  renderList();
-  return root;
+  await renderList();
+}
