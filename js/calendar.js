@@ -1,24 +1,23 @@
 // js/calendar.js
 // 가로형 평일 달력 렌더러 + 투입/역할/업무 관리
-// 쿼리를 팀 필터로 제한(비관리자). 관리자는 전체 조회.
+// - 휴일: 헤더/셀 붉은 강조
+// - 업무 배정: 모달 UI
 
 import { db } from "./firebase.js";
 import { requireAuthAndTeams } from "./auth.js";
 import {
-  collection, query, where, getDocs, addDoc, updateDoc, doc, setDoc, getDoc
+  collection, query, where, getDocs, addDoc, doc, setDoc, getDoc
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-// ---- 유틸: 날짜 처리 ----
+// ---- 유틸 ----
 function fmt(d){ return d.toISOString().slice(0,10); }
 function parseYmd(s){ const [y,m,dd]=s.split("-").map(Number); return new Date(y, m-1, dd); }
 function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
-function isWeekend(d){ const day=d.getDay(); return day===0 || day===6; } // 일(0), 토(6)
+function isWeekend(d){ const day=d.getDay(); return day===0 || day===6; }
 
-// 화면 상단 월 이동 상태
-let viewStartDate = new Date(); // 기본: 오늘 기준 주간부터
+let viewStartDate = new Date();
 const VIEW_BUSINESS_DAYS = 22;
 
-// 한국 공휴일 샘플
 const STATIC_HOLIDAYS = {
   2024: ["2024-01-01","2024-02-09","2024-02-12","2024-03-01","2024-04-10","2024-05-05","2024-05-06","2024-06-06","2024-08-15","2024-09-16","2024-09-17","2024-09-18","2024-10-03","2024-10-09","2024-12-25"],
   2025: ["2025-01-01","2025-01-28","2025-01-29","2025-01-30","2025-03-01","2025-05-05","2025-06-06","2025-08-15","2025-10-03","2025-10-06","2025-10-09","2025-12-25"],
@@ -61,11 +60,9 @@ async function getBusinessDaysRange(startDate, nBusiness) {
   return days;
 }
 
-// ---- 데이터 접근: 직원/배정 ----
 async function loadEmployees(teams, isAdmin){
   const col = collection(db, "employees");
 
-  // Firestore 'in' 연산자는 최대 10개 값 제한 → 10 초과 시 분할 쿼리
   async function fetchByTeams(teamList){
     if (!teamList.length) return [];
     if (teamList.length <= 10) {
@@ -75,7 +72,6 @@ async function loadEmployees(teams, isAdmin){
       snaps.forEach(docu => arr.push({ id: docu.id, ...docu.data() }));
       return arr;
     }
-    // 10 초과: chunk
     const chunks = [];
     for (let i=0;i<teamList.length;i+=10) chunks.push(teamList.slice(i,i+10));
     const all = [];
@@ -89,7 +85,6 @@ async function loadEmployees(teams, isAdmin){
 
   let out = [];
   if (isAdmin) {
-    // 관리자만 전체 조회 허용
     const snaps = await getDocs(col);
     snaps.forEach(d=> out.push({ id:d.id, ...d.data() }));
   } else {
@@ -101,7 +96,7 @@ async function loadEmployees(teams, isAdmin){
 
 async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
   const col = collection(db, "assignments");
-  const snaps = await getDocs(col); // assignments는 규칙상 로그인 사용자 read 허용
+  const snaps = await getDocs(col);
   const s = parseYmd(startYmd);
   const e = parseYmd(endYmd);
   const byEmp = {};
@@ -116,6 +111,73 @@ async function loadAssignmentsInRange(startYmd, endYmd, empIds) {
     }
   });
   return byEmp;
+}
+
+// ---- 업무 배정 모달 ----
+function openAssignModal({ emp, dateYmd, onSubmit }) {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4";
+
+  overlay.innerHTML = `
+    <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-lg p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-lg font-bold text-gray-900 dark:text-white">업무 배정</h3>
+        <button class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" data-close>&times;</button>
+      </div>
+      <div class="text-xs text-gray-500 mb-3">${emp.name} · ${emp.team} · ${dateYmd}</div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm mb-1">역할</label>
+          <input id="assign-role" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" placeholder="예: 인프라/보안"/>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">업무 내용</label>
+          <input id="assign-task" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" placeholder="업무 요약"/>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm mb-1">시작일</label>
+            <input id="assign-start" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">종료일</label>
+            <input id="assign-end" type="date" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">투입 비율 (0~1)</label>
+          <input id="assign-alloc" type="number" min="0" max="1" step="0.1" value="1" class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 mt-4">
+        <button class="rounded-lg border px-3 py-1.5" data-close>취소</button>
+        <button class="rounded-lg bg-primary text-white px-4 py-1.5" id="assign-save">저장</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  const close = ()=> overlay.remove();
+  overlay.querySelectorAll("[data-close]").forEach(b=> b.addEventListener("click", close));
+
+  const startEl = overlay.querySelector("#assign-start");
+  const endEl = overlay.querySelector("#assign-end");
+  startEl.value = dateYmd;
+  endEl.value = dateYmd;
+
+  overlay.querySelector("#assign-save").addEventListener("click", async ()=>{
+    const role = overlay.querySelector("#assign-role").value.trim();
+    const task = overlay.querySelector("#assign-task").value.trim();
+    const startDate = startEl.value;
+    const endDate = endEl.value;
+    const allocation = parseFloat(overlay.querySelector("#assign-alloc").value || "1");
+    if (!task || !startDate || !endDate) { alert("업무/기간을 입력하세요."); return; }
+
+    await onSubmit({ role, task, startDate, endDate, allocation: isNaN(allocation)?1:allocation });
+    close();
+  });
 }
 
 // ---- 렌더링 ----
@@ -136,8 +198,6 @@ export async function renderCalendarPage(container){
           <input type="date" id="start-date" class="rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"/>
           <button id="apply-range" class="text-sm rounded-lg bg-primary text-white px-3 py-1.5">적용</button>
           <button id="add-holiday" class="text-sm rounded-lg border px-3 py-1.5 dark:border-gray-700">휴일추가</button>
-          <button id="add-assignment" class="text-sm rounded-lg bg-blue-50 text-blue-700 px-3 py-1.5 border border-blue-200">업무 배정</button>
-          <button id="favorites-btn" class="text-sm rounded-lg border px-3 py-1.5 dark:border-gray-700">즐겨찾기</button>
         </div>
       </div>
       <div id="calendar-title" class="text-lg font-bold mb-3 text-gray-900 dark:text-white"></div>
@@ -186,26 +246,6 @@ export async function renderCalendarPage(container){
     }
   };
 
-  document.getElementById("add-assignment").onclick = async ()=>{
-    const empId = prompt("배정할 직원 ID(employees 문서 ID):");
-    const role = prompt("역할(예: 인프라/보안 등):");
-    const task = prompt("업무 내용:");
-    const startDate = prompt("시작일(YYYY-MM-DD):", fmt(viewStartDate));
-    const endDate = prompt("종료일(YYYY-MM-DD):", fmt(addDays(viewStartDate, 7)));
-    const allocation = parseFloat(prompt("투입 비율(0~1, 예: 0.5):", "1")) || 1;
-    if (!empId || !role || !task || !startDate || !endDate) return;
-
-    await addDoc(collection(db, "assignments"), {
-      empId, role, task, startDate, endDate, allocation
-    });
-    alert("업무 배정 등록 완료");
-    draw();
-  };
-
-  document.getElementById("favorites-btn").onclick = ()=>{
-    alert("즐겨찾기: 입력 시 '자주 쓰는 역할/업무'는 차기 개선에서 모달로 제공합니다. (간단화 안내)");
-  };
-
   async function draw(){
     const days = await getBusinessDaysRange(viewStartDate, VIEW_BUSINESS_DAYS);
     const title = `${days[0].getFullYear()}년 ${days[0].getMonth()+1}월 ~ ${days[days.length-1].getFullYear()}년 ${days[days.length-1].getMonth()+1}월 (영업일 ${days.length}일)`;
@@ -217,6 +257,15 @@ export async function renderCalendarPage(container){
 
     const wrap = document.getElementById("calendar-wrap");
     wrap.innerHTML = "";
+
+    // 휴일 빠른 조회를 위해 맵 생성
+    const holidaySetByYear = {};
+    for (const d of days) {
+      const y = d.getFullYear();
+      if (!holidaySetByYear[y]) {
+        holidaySetByYear[y] = new Set(await loadYearHolidays(y));
+      }
+    }
 
     // 헤더
     const headerRow = document.createElement("div");
@@ -240,9 +289,10 @@ export async function renderCalendarPage(container){
       const el = document.createElement("div");
       el.className = "calendar-cell px-3 py-2 text-center text-sm font-semibold text-gray-700 dark:text-gray-200";
       el.textContent = label;
-      const y = d.getFullYear();
-      const isHol = (STATIC_HOLIDAYS[y]||[]).includes(ymd);
-      if (isHol) el.classList.add("holiday-label");
+      if (holidaySetByYear[d.getFullYear()]?.has(ymd)) {
+        el.classList.add("holiday-label");
+        el.classList.add("holiday-bg");
+      }
       headerRow.appendChild(el);
     });
     wrap.appendChild(headerRow);
@@ -273,6 +323,9 @@ export async function renderCalendarPage(container){
         const ymd = fmt(day);
         const cell = document.createElement("div");
         cell.className = "calendar-cell px-2 py-2 text-sm text-gray-800 dark:text-gray-100 align-top";
+        if (holidaySetByYear[day.getFullYear()]?.has(ymd)) {
+          cell.classList.add("holiday-bg");
+        }
 
         empAssigns.forEach(a=>{
           if (ymd >= a.startDate && ymd <= a.endDate) {
@@ -284,23 +337,21 @@ export async function renderCalendarPage(container){
           }
         });
 
-        cell.addEventListener("dblclick", async ()=>{
-          const task = prompt(`[${emp.name}] ${ymd} 업무 내용:`);
-          if (!task) return;
-          const roleInput = row.querySelector(`input[data-emp="${emp.id}"]`);
-          const role = roleInput?.value?.trim() || "";
-          await addDoc(collection(db, "assignments"), {
-            empId: emp.id,
-            role,
-            task,
-            startDate: ymd,
-            endDate: ymd,
-            allocation: 1
+        // 더블클릭 → 업무 배정 모달
+        cell.addEventListener("dblclick", ()=>{
+          openAssignModal({
+            emp, dateYmd: ymd,
+            onSubmit: async ({ role, task, startDate, endDate, allocation })=>{
+              await addDoc(collection(db, "assignments"), {
+                empId: emp.id, role, task, startDate, endDate, allocation
+              });
+              // 즉시 반영
+              const chip = document.createElement("div");
+              chip.className = "task-chip";
+              chip.textContent = task;
+              cell.appendChild(chip);
+            }
           });
-          const chip = document.createElement("div");
-          chip.className = "task-chip";
-          chip.textContent = task;
-          cell.appendChild(chip);
         });
 
         row.appendChild(cell);
