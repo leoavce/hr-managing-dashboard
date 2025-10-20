@@ -67,7 +67,6 @@ async function loadUserTeams(uid) {
       currentTeams = Array.isArray(data.teams) ? data.teams : [];
     } else {
       currentTeams = [];
-      // 팀 미분류 상태로 동작 (DEV 규칙에서 전부 읽기 OK)
     }
   } catch (err) {
     console.warn("loadUserTeams error (무시):", err);
