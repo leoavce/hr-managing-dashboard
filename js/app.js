@@ -1,56 +1,62 @@
-/**
- * 엔트리 포인트
- * - 인증 상태에 따라 라우팅/렌더링
- * - 사이드바 이벤트 바인딩
- * - 기본 라우트: 캘린더
- */
-import './firebase-init.js';
-import { listenAuth, doLogout } from './auth.js';
-import { renderCalendarView } from './calendar.js';
-import { renderManMonthView } from './manmonth.js';
-import { renderHRView } from './hr.js';
-import { mountSidebarNavigation, renderInMain, Routes, setActiveRoute } from './ui.js';
+// js/app.js
+// 간단 해시 라우터 및 페이지 렌더링
 
-import '../css/styles.css'; // GitHub Pages에선 상대경로 주의: 루트 기준 배포 시 제거해도 무방(HTML link로 대체 가능)
+import { requireAuthAndTeams } from "./auth.js";
+import { renderCalendarPage } from "./calendar.js";
+import { renderManMonthPage } from "./mm.js";
+import { renderHRPage } from "./hr.js";
 
-/* 사이드바 네비 연결 */
-mountSidebarNavigation((hash) => {
-  setActiveRoute(hash);
-  route(hash);
-});
+const pageTitle = document.getElementById("page-title");
+const pageContainer = document.getElementById("page-container");
 
-/* 우상단에 로그아웃 버튼 동적 주입(필요 시) */
-function injectLogout() {
-  const aside = document.querySelector('aside .p-6');
-  if (!aside || aside.querySelector('#logout-btn')) return;
-  const btn = document.createElement('button');
-  btn.id = 'logout-btn';
-  btn.className = 'mt-3 text-xs text-gray-500 hover:underline';
-  btn.textContent = '로그아웃';
-  btn.addEventListener('click', doLogout);
-  aside.appendChild(btn);
+// 사이드바 라우트 링크 활성화 토글
+function markActive(route) {
+  document.querySelectorAll(".route-link").forEach(a => {
+    if (a.dataset.route === route) {
+      a.classList.add("bg-primary/10","text-primary");
+      a.classList.remove("text-gray-700","dark:text-gray-300");
+    } else {
+      a.classList.remove("bg-primary/10","text-primary");
+      a.classList.add("text-gray-700","dark:text-gray-300");
+    }
+  });
 }
 
-function route(hash, profile) {
-  // 라우트별 뷰 교체
-  const h = hash || window.location.hash || Routes.CALENDAR;
-  let view;
-  if (h === Routes.MANMONTH) {
-    view = renderManMonthView(profile);
-  } else if (h === Routes.HR) {
-    view = renderHRView(profile);
-  } else {
-    view = renderCalendarView(profile);
+async function route() {
+  const { currentUser } = await requireAuthAndTeams();
+  if (!currentUser) return; // auth.js에서 화면 전환
+
+  const hash = (location.hash || "#/calendar").replace("#/", "");
+  markActive(hash);
+
+  switch (hash) {
+    case "calendar":
+      pageTitle.textContent = "인력 투입 달력";
+      pageContainer.innerHTML = "";
+      await renderCalendarPage(pageContainer);
+      break;
+    case "manmonth":
+      pageTitle.textContent = "Man-Month 계산";
+      pageContainer.innerHTML = "";
+      await renderManMonthPage(pageContainer);
+      break;
+    case "hr":
+      pageTitle.textContent = "인력 관리";
+      pageContainer.innerHTML = "";
+      await renderHRPage(pageContainer);
+      break;
+    default:
+      location.hash = "#/calendar";
   }
-  renderInMain(view);
 }
 
-listenAuth(({ user, profile }) => {
-  if (!user) return; // 로그인 오버레이가 표시됨
-  injectLogout();
-  // 최초 진입: 기본 캘린더
-  route(window.location.hash || Routes.CALENDAR, profile);
+window.addEventListener("hashchange", route);
+
+// 사이드바 클릭 시 라우팅
+document.querySelectorAll(".route-link").forEach(a => {
+  a.addEventListener("click", () => {
+    location.hash = `#/${a.dataset.route}`;
+  });
 });
 
-// 해시 변경 대응
-window.addEventListener('hashchange', () => route(window.location.hash));
+// 초기 라우팅은 auth.js의 onAuthStateChanged에서 트리거됨
